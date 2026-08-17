@@ -2,6 +2,7 @@ const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,
 function secret(name:string,fallback:string){const direct=Deno.env.get(name);if(direct)return direct;const raw=Deno.env.get(fallback)||'';try{const parsed=JSON.parse(raw);return String(parsed.default||Object.values(parsed)[0]||'')}catch{return raw}}
 const minimums:Record<string,number>={usdt_bep20:12,usdt_erc20:20,usdt_trc20:20,usdt_ton:10}
 Deno.serve(async request=>{
+ const startedAt=new Date().toISOString()
  if(request.method!=='POST')return json({error:'Method not allowed'},405)
  const workerSecret=Deno.env.get('PAYMENT_WORKER_SECRET')||''
  if(!workerSecret||request.headers.get('authorization')!==`Bearer ${workerSecret}`)return json({error:'Unauthorized'},401)
@@ -31,6 +32,6 @@ Deno.serve(async request=>{
     }
    }catch(error){await fetch(`${url}/rest/v1/rpc/internal_record_payment_verification_failure`,{method:'POST',headers,body:JSON.stringify({p_order_id:order.id,p_error:error instanceof Error?error.message:'Verification failed',p_manual:false})});results.push({id:order.id,status:'retry'})}
   }
-  return json({ok:true,processed:results.length,results})
- }catch(error){return json({error:error instanceof Error?error.message:'Verification worker failed'},503)}
+  const result={ok:true,processed:results.length,results};await fetch(`${url}/rest/v1/rpc/internal_record_worker_heartbeat`,{method:'POST',headers,body:JSON.stringify({p_worker:'verify-usdt-payments',p_success:true,p_started_at:startedAt,p_result:result,p_error:null})});return json(result)
+ }catch(error){const message=error instanceof Error?error.message:'Verification worker failed';if(url&&serviceKey)await fetch(`${url}/rest/v1/rpc/internal_record_worker_heartbeat`,{method:'POST',headers:{apikey:serviceKey,authorization:`Bearer ${serviceKey}`,'content-type':'application/json'},body:JSON.stringify({p_worker:'verify-usdt-payments',p_success:false,p_started_at:startedAt,p_result:{},p_error:message})}).catch(()=>null);return json({error:message},503)}
 })

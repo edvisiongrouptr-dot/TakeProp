@@ -11,6 +11,7 @@ async function prices(){
  const marks:Record<string,number>={};for(const symbol of symbols){const values=valid.map(x=>+x[symbol]).filter(x=>Number.isFinite(x)&&x>0).sort((a,b)=>a-b);if(!values.length)throw new Error(`Missing ${symbol}`);const mark=values.length>1?(values[0]+values[1])/2:values[0];if(values.length>1&&(values[1]-values[0])/mark>.015)throw new Error(`Divergent ${symbol}`);marks[symbol]=mark}return marks
 }
 Deno.serve(async request=>{
+ const startedAt=new Date().toISOString()
  if(request.method!=='POST')return json({error:'Method not allowed'},405)
  const expected=Deno.env.get('ORDER_WORKER_SECRET')||''
  if(!expected||request.headers.get('authorization')!==`Bearer ${expected}`)return json({error:'Unauthorized'},401)
@@ -25,6 +26,8 @@ Deno.serve(async request=>{
    const response=await fetch(`${url}/rest/v1/rpc/internal_advanced_snapshot`,{method:'POST',headers:{apikey:serviceKey,authorization:`Bearer ${serviceKey}`,'content-type':'application/json'},body:JSON.stringify({p_user_id:account.user_id,p_account_id:account.id,p_marks:marks})})
    if(response.ok){await fetch(`${url}/rest/v1/rpc/internal_finalize_sim_account`,{method:'POST',headers:{apikey:serviceKey,authorization:`Bearer ${serviceKey}`,'content-type':'application/json'},body:JSON.stringify({p_user_id:account.user_id,p_account_id:account.id,p_marks:marks})})}else failures.push(account.id)
   }
-  return json({ok:failures.length===0,processed:accounts.length,failed:failures.length,serverTime:new Date().toISOString()},failures.length?207:200)
- }catch(error){return json({error:error instanceof Error?error.message:'Order processing failed'},503)}
+  const result={ok:failures.length===0,processed:accounts.length,failed:failures.length,serverTime:new Date().toISOString()}
+  await fetch(`${url}/rest/v1/rpc/internal_record_worker_heartbeat`,{method:'POST',headers:{apikey:serviceKey,authorization:`Bearer ${serviceKey}`,'content-type':'application/json'},body:JSON.stringify({p_worker:'process-active-orders',p_success:result.ok,p_started_at:startedAt,p_result:result,p_error:failures.length?'One or more accounts failed':null})})
+  return json(result,failures.length?207:200)
+ }catch(error){const message=error instanceof Error?error.message:'Order processing failed';if(url&&serviceKey)await fetch(`${url}/rest/v1/rpc/internal_record_worker_heartbeat`,{method:'POST',headers:{apikey:serviceKey,authorization:`Bearer ${serviceKey}`,'content-type':'application/json'},body:JSON.stringify({p_worker:'process-active-orders',p_success:false,p_started_at:startedAt,p_result:{},p_error:message})}).catch(()=>null);return json({error:message},503)}
 })
