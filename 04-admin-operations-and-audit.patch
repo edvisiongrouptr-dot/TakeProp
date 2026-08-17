@@ -1,0 +1,230 @@
+From 3fbe91f3f5bed0aeeafa2797ef782c7593a0216f Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Mon, 17 Aug 2026 12:45:28 +0200
+Subject: [PATCH] Add audited administrator operations center
+
+---
+ apps/web/app/admin/account-actions.tsx        | 10 ++
+ apps/web/app/admin/admin.module.css           |  1 +
+ apps/web/app/admin/page.tsx                   | 44 ++++++---
+ apps/web/app/api/admin/operations/route.ts    | 19 ++++
+ ...60817220000_admin_operations_and_audit.sql | 93 +++++++++++++++++++
+ 5 files changed, 154 insertions(+), 13 deletions(-)
+ create mode 100644 apps/web/app/admin/account-actions.tsx
+ create mode 100644 apps/web/app/api/admin/operations/route.ts
+ create mode 100644 supabase/migrations/20260817220000_admin_operations_and_audit.sql
+
+diff --git a/apps/web/app/admin/account-actions.tsx b/apps/web/app/admin/account-actions.tsx
+new file mode 100644
+index 0000000..55b4103
+--- /dev/null
++++ b/apps/web/app/admin/account-actions.tsx
+@@ -0,0 +1,10 @@
++'use client'
++import { useState } from 'react'
++import { useRouter } from 'next/navigation'
++import styles from './admin.module.css'
++
++export default function AccountActions({kind,id,current}:{kind:'kyc'|'account'|'risk';id:string;current?:string}){
++ const router=useRouter(),[busy,setBusy]=useState(false),[error,setError]=useState('')
++ async function run(status?:string){const reason=prompt(kind==='risk'?'Resolution note':`Reason for ${status}`)||'';if(reason.trim().length<3)return;setBusy(true);setError('');const action=kind==='kyc'?'set_kyc':kind==='account'?'set_account_status':'resolve_risk';const body=kind==='kyc'?{action,userId:id,status,reason}:kind==='account'?{action,accountId:id,status,reason}:{action,eventId:id,reason};const response=await fetch('/api/admin/operations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const result=await response.json().catch(()=>({}));setBusy(false);if(!response.ok){setError(result.error||'Operation failed');return}router.refresh()}
++ return <div className={styles.miniActions}>{kind==='kyc'&&<><button disabled={busy||current==='approved'} onClick={()=>run('approved')}>Approve KYC</button><button disabled={busy||current==='rejected'} onClick={()=>run('rejected')}>Reject</button></>}{kind==='account'&&<><button disabled={busy||current==='active'} onClick={()=>run('active')}>Activate</button><button disabled={busy||current==='suspended'} onClick={()=>run('suspended')}>Suspend</button><button disabled={busy||current==='closed'} onClick={()=>run('closed')}>Close</button></>}{kind==='risk'&&<button disabled={busy} onClick={()=>run()}>Resolve event</button>}{error&&<p>{error}</p>}</div>
++}
+diff --git a/apps/web/app/admin/admin.module.css b/apps/web/app/admin/admin.module.css
+index 877086e..41dde15 100644
+--- a/apps/web/app/admin/admin.module.css
++++ b/apps/web/app/admin/admin.module.css
+@@ -1 +1,2 @@
+ .page{min-height:100vh;background:#050b0e;color:#f4f6f4;padding:clamp(24px,5vw,72px);font-family:Arial,sans-serif}.header{display:flex;justify-content:space-between;gap:30px;border-bottom:1px solid #1e3435;padding-bottom:32px;margin-bottom:48px}.header small,.title b,.card a{color:#62d89d}.header h1{font-size:clamp(40px,7vw,74px);margin:10px 0}.header p{color:#8a9893}.header a,.card a{text-decoration:none}.title{display:flex;align-items:center;gap:15px;margin:36px 0 18px}.title h2{margin:0}.title b{border:1px solid #285440;padding:7px 11px}.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:18px}.card,.empty{border:1px solid #203638;background:#091316;padding:24px}.head{display:flex;justify-content:space-between}.head span{color:#f1c85a}.head time{font-size:12px;color:#798884}.card h3{font-size:24px;margin:24px 0 7px}.card>strong{font-size:30px;color:#62d89d}.card dl{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:25px 0}.card dl div{border-top:1px solid #1b2d2f;padding-top:10px}.card dt,.card label{font-size:11px;color:#71817d;text-transform:uppercase}.card dd{margin:5px 0}.card code{display:block;margin:9px 0 14px;padding:13px;background:#04090b;overflow-wrap:anywhere}.actions{display:grid;grid-template-columns:2fr 1fr;gap:10px;border-top:1px solid #1e3435;padding-top:20px;margin-top:20px}.actions button{background:#42df91;padding:14px;font-weight:800;border:1px solid #31644e}.actions button:nth-child(2){background:transparent;color:#ef7777;border-color:#663737}.actions p{grid-column:1/-1;color:#ef7777}@media(max-width:650px){.header{display:block}.header a{display:inline-block;margin-top:18px}.card dl,.actions{grid-template-columns:1fr}.page{padding:24px 16px}}
++.table{display:grid;border:1px solid #203638}.table>article{display:grid;grid-template-columns:2fr .8fr 1fr 1.4fr;align-items:center;gap:16px;padding:16px 20px;border-bottom:1px solid #203638;background:#091316}.table>article:last-child{border-bottom:0}.table article div:first-child{display:flex;flex-direction:column;gap:5px}.table small,.table time,.table span,.table i{color:#71817d;font-size:11px}.miniActions{display:flex;gap:7px;flex-wrap:wrap}.miniActions button{border:1px solid #31644e;background:#10271e;color:#63db9e;padding:8px 10px}.miniActions button:nth-child(2),.miniActions button:nth-child(3){color:#ef7777;border-color:#663737;background:#251111}.miniActions button:disabled{opacity:.35}.miniActions p{width:100%;color:#ef7777;font-size:11px;margin:0}.audit{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:10px}.audit article{border:1px solid #203638;background:#091316;padding:16px;display:grid;gap:7px}.audit b{text-transform:capitalize}.audit span,.audit time{color:#71817d;font-size:11px}.audit p{margin:0;color:#a8b5b1}@media(max-width:800px){.table>article{grid-template-columns:1fr}.miniActions{margin-top:4px}}
+diff --git a/apps/web/app/admin/page.tsx b/apps/web/app/admin/page.tsx
+index 64fc7ea..113eacf 100644
+--- a/apps/web/app/admin/page.tsx
++++ b/apps/web/app/admin/page.tsx
+@@ -1,28 +1,46 @@
+ import Link from 'next/link'
+ import { redirect } from 'next/navigation'
+-import { getAuthenticatedUser, getOwnData } from '../../lib/supabase-rest'
++import { getAuthenticatedUser,getOwnData } from '../../lib/supabase-rest'
+ import PaymentActions from './payment-actions'
+ import PayoutActions from './payout-actions'
++import AccountActions from './account-actions'
+ import styles from './admin.module.css'
+ type Role={role:string}
+-type Profile={id:string;full_name:string|null}
++type Profile={id:string;full_name:string|null;kyc_status:string;created_at:string}
+ type Order={id:string;user_id:string;amount:number;currency:string;status:string;payment_provider:string|null;provider_payment_id:string|null;created_at:string;challenge_plans:{name:string;account_size:number}|null}
+ type Payout={id:string;user_id:string;amount:number;currency:string;status:string;method:string;destination_ref:string|null;provider_payout_id:string|null;requested_at:string}
++type Account={id:string;user_id:string;display_account_id:string;phase:string;status:string;balance:number;equity:number;evaluation_step:number;evaluation_steps:number;created_at:string}
++type Risk={id:string;user_id:string;account_id:string;event_type:string;severity:string;status:string;measured_value:number;limit_value:number;created_at:string}
++type Audit={id:string;actor_user_id:string;action:string;entity_type:string;reason:string|null;created_at:string}
+ export const dynamic='force-dynamic'
++
+ export default async function AdminPage(){
+- const auth=await getAuthenticatedUser(); if(!auth) redirect('/auth?next=/admin')
++ const auth=await getAuthenticatedUser();if(!auth)redirect('/auth?next=/admin')
+  const roles=await getOwnData<Role[]>(`user_roles?select=role&user_id=eq.${auth.user.id}`,auth.accessToken)
+- if(!roles.some(r=>r.role==='admin'||r.role==='finance')) redirect('/dashboard')
+- const [orders,profiles,payouts]=await Promise.all([
++ if(!roles.some(r=>r.role==='admin'||r.role==='finance'))redirect('/dashboard')
++ const isAdmin=roles.some(r=>r.role==='admin')
++ const [orders,profiles,payouts,accounts,risks,audit]=await Promise.all([
+   getOwnData<Order[]>('orders?select=id,user_id,amount,currency,status,payment_provider,provider_payment_id,created_at,challenge_plans(name,account_size)&payment_provider=like.usdt_*&order=created_at.desc&limit=100',auth.accessToken),
+-  getOwnData<Profile[]>('profiles?select=id,full_name',auth.accessToken),
+-  getOwnData<Payout[]>('payout_requests?select=id,user_id,amount,currency,status,method,destination_ref,provider_payout_id,requested_at&order=requested_at.desc&limit=100',auth.accessToken)
++  getOwnData<Profile[]>('profiles?select=id,full_name,kyc_status,created_at&order=created_at.desc&limit=200',auth.accessToken),
++  getOwnData<Payout[]>('payout_requests?select=id,user_id,amount,currency,status,method,destination_ref,provider_payout_id,requested_at&order=requested_at.desc&limit=100',auth.accessToken),
++  isAdmin?getOwnData<Account[]>('trading_accounts?select=id,user_id,display_account_id,phase,status,balance,equity,evaluation_step,evaluation_steps,created_at&order=created_at.desc&limit=200',auth.accessToken):Promise.resolve([]),
++  isAdmin?getOwnData<Risk[]>('risk_events?select=id,user_id,account_id,event_type,severity,status,measured_value,limit_value,created_at&order=created_at.desc&limit=100',auth.accessToken):Promise.resolve([]),
++  isAdmin?getOwnData<Audit[]>('admin_audit_log?select=id,actor_user_id,action,entity_type,reason,created_at&order=created_at.desc&limit=100',auth.accessToken):Promise.resolve([])
+  ])
+  const names=new Map(profiles.map(p=>[p.id,p.full_name||p.id.slice(0,8)])),pending=orders.filter(o=>o.status==='pending'),reviewed=orders.filter(o=>o.status!=='pending')
+- return <main className={styles.page}><header className={styles.header}><div><small>TAKEPROP OPERATIONS</small><h1>Payment review</h1><p>Verify the transaction on the correct blockchain before approving it.</p></div><Link href="/dashboard">Trader dashboard →</Link></header>
+- <section><div className={styles.title}><h2>Pending payments</h2><b>{pending.length}</b></div>{pending.length===0?<div className={styles.empty}>No payments are waiting for review.</div>:<div className={styles.grid}>{pending.map(o=><Card key={o.id} order={o} name={names.get(o.user_id)||o.user_id.slice(0,8)} pending/>)}</div>}</section>
+- <section><div className={styles.title}><h2>Review history</h2><b>{reviewed.length}</b></div><div className={styles.grid}>{reviewed.map(o=><Card key={o.id} order={o} name={names.get(o.user_id)||o.user_id.slice(0,8)}/>)}</div></section>
+- <section><div className={styles.title}><h2>Payout operations</h2><b>{payouts.length}</b></div><div className={styles.grid}>{payouts.map(p=><article key={p.id} className={styles.card}><div className={styles.head}><span>{p.status.toUpperCase()}</span><time>{new Date(p.requested_at).toLocaleString('tr-TR')}</time></div><h3>{Number(p.amount).toFixed(2)} {p.currency}</h3><dl><div><dt>Trader</dt><dd>{names.get(p.user_id)||p.user_id.slice(0,8)}</dd></div><div><dt>Network</dt><dd>{p.method}</dd></div></dl><label>Destination</label><code>{p.destination_ref||'—'}</code>{p.provider_payout_id&&<><label>Payout transaction</label><code>{p.provider_payout_id}</code></>}<PayoutActions id={p.id} status={p.status}/></article>)}</div></section></main>
++ return <main className={styles.page}>
++  <header className={styles.header}><div><small>TAKEPROP OPERATIONS</small><h1>Operations center</h1><p>Payments, payouts, traders, risk and audit controls.</p></div><Link href="/dashboard">Trader dashboard →</Link></header>
++  <section><Title label="Pending payments" count={pending.length}/>{pending.length===0?<div className={styles.empty}>No payments are waiting for review.</div>:<div className={styles.grid}>{pending.map(o=><PaymentCard key={o.id} order={o} name={names.get(o.user_id)||o.user_id.slice(0,8)} pending/>)}</div>}</section>
++  <section><Title label="Review history" count={reviewed.length}/><div className={styles.grid}>{reviewed.map(o=><PaymentCard key={o.id} order={o} name={names.get(o.user_id)||o.user_id.slice(0,8)}/>)}</div></section>
++  <section><Title label="Payout operations" count={payouts.length}/><div className={styles.grid}>{payouts.map(p=><article key={p.id} className={styles.card}><Head status={p.status} date={p.requested_at}/><h3>{Number(p.amount).toFixed(2)} {p.currency}</h3><dl><Info label="Trader" value={names.get(p.user_id)||p.user_id.slice(0,8)}/><Info label="Network" value={p.method}/></dl><label>Destination</label><code>{p.destination_ref||'—'}</code>{p.provider_payout_id&&<><label>Payout transaction</label><code>{p.provider_payout_id}</code></>}<PayoutActions id={p.id} status={p.status}/></article>)}</div></section>
++  {isAdmin&&<><section><Title label="Trader identity review" count={profiles.length}/><div className={styles.table}>{profiles.map(p=><article key={p.id}><div><b>{p.full_name||'Unnamed trader'}</b><small>{p.id}</small></div><strong>{p.kyc_status.replace('_',' ').toUpperCase()}</strong><time>{new Date(p.created_at).toLocaleDateString('tr-TR')}</time><AccountActions kind="kyc" id={p.id} current={p.kyc_status}/></article>)}</div></section>
++  <section><Title label="Trading accounts" count={accounts.length}/><div className={styles.table}>{accounts.map(a=><article key={a.id}><div><b>{a.display_account_id}</b><small>{names.get(a.user_id)||a.user_id.slice(0,8)} · {a.phase} · step {a.evaluation_step}/{a.evaluation_steps}</small></div><strong>{a.status.toUpperCase()}</strong><span>{Number(a.equity).toFixed(2)} / {Number(a.balance).toFixed(2)}</span><AccountActions kind="account" id={a.id} current={a.status}/></article>)}</div></section>
++  <section><Title label="Risk events" count={risks.length}/><div className={styles.table}>{risks.map(r=><article key={r.id}><div><b>{r.event_type.replaceAll('_',' ')}</b><small>{names.get(r.user_id)||r.user_id.slice(0,8)} · {r.severity}</small></div><strong>{r.status.toUpperCase()}</strong><span>{Number(r.measured_value).toFixed(2)} / {Number(r.limit_value).toFixed(2)}</span>{r.status!=='resolved'?<AccountActions kind="risk" id={r.id}/>:<i>Resolved</i>}</article>)}</div></section>
++  <section><Title label="Audit log" count={audit.length}/><div className={styles.audit}>{audit.map(a=><article key={a.id}><b>{a.action.replaceAll('_',' ')}</b><span>{a.entity_type}</span><p>{a.reason||'No note'}</p><time>{new Date(a.created_at).toLocaleString('tr-TR')}</time></article>)}</div></section></>}
++ </main>
+ }
+-function Card({order,name,pending=false}:{order:Order;name:string;pending?:boolean}){const network=(order.payment_provider||'').replace('usdt_','').toUpperCase();return <article className={styles.card}><div className={styles.head}><span>{order.status.toUpperCase()}</span><time>{new Date(order.created_at).toLocaleString('tr-TR')}</time></div><h3>{order.challenge_plans?.name||'Challenge plan'}</h3><strong>{Number(order.amount).toFixed(2)} {order.currency}</strong><dl><div><dt>Trader</dt><dd>{name}</dd></div><div><dt>Account</dt><dd>USD {Number(order.challenge_plans?.account_size||0).toLocaleString('en-US')}</dd></div><div><dt>Network</dt><dd>{network}</dd></div><div><dt>Order</dt><dd>{order.id.slice(0,8).toUpperCase()}</dd></div></dl><label>Transaction hash</label><code>{order.provider_payment_id||'—'}</code>{order.provider_payment_id&&<a target="_blank" rel="noreferrer" href={explorer(network,order.provider_payment_id)}>Open blockchain explorer ↗</a>}{pending&&<PaymentActions orderId={order.id}/>}</article>}
+-function explorer(n:string,t:string){if(n==='BEP20')return 'https://bscscan.com/tx/'+t;if(n==='ERC20')return 'https://etherscan.io/tx/'+t;if(n==='TRC20')return 'https://tronscan.org/#/transaction/'+t;return 'https://tonviewer.com/transaction/'+t}
++function Title({label,count}:{label:string;count:number}){return <div className={styles.title}><h2>{label}</h2><b>{count}</b></div>}
++function Head({status,date}:{status:string;date:string}){return <div className={styles.head}><span>{status.toUpperCase()}</span><time>{new Date(date).toLocaleString('tr-TR')}</time></div>}
++function Info({label,value}:{label:string;value:string}){return <div><dt>{label}</dt><dd>{value}</dd></div>}
++function PaymentCard({order,name,pending=false}:{order:Order;name:string;pending?:boolean}){const network=(order.payment_provider||'').replace('usdt_','').toUpperCase();return <article className={styles.card}><Head status={order.status} date={order.created_at}/><h3>{order.challenge_plans?.name||'Challenge plan'}</h3><strong>{Number(order.amount).toFixed(2)} {order.currency}</strong><dl><Info label="Trader" value={name}/><Info label="Account" value={`USD ${Number(order.challenge_plans?.account_size||0).toLocaleString('en-US')}`}/><Info label="Network" value={network}/><Info label="Order" value={order.id.slice(0,8).toUpperCase()}/></dl><label>Transaction hash</label><code>{order.provider_payment_id||'—'}</code>{order.provider_payment_id&&<a target="_blank" rel="noreferrer" href={explorer(network,order.provider_payment_id)}>Open blockchain explorer ↗</a>}{pending&&<PaymentActions orderId={order.id}/>}</article>}
++function explorer(n:string,t:string){if(n==='BEP20')return'https://bscscan.com/tx/'+t;if(n==='ERC20')return'https://etherscan.io/tx/'+t;if(n==='TRC20')return'https://tronscan.org/#/transaction/'+t;return'https://tonviewer.com/transaction/'+t}
+diff --git a/apps/web/app/api/admin/operations/route.ts b/apps/web/app/api/admin/operations/route.ts
+new file mode 100644
+index 0000000..d972225
+--- /dev/null
++++ b/apps/web/app/api/admin/operations/route.ts
+@@ -0,0 +1,19 @@
++import { NextRequest,NextResponse } from 'next/server'
++import { getAuthenticatedUser,postOwnData } from '../../../../lib/supabase-rest'
++
++export async function POST(request:NextRequest){
++ const auth=await getAuthenticatedUser();if(!auth)return NextResponse.json({error:'Unauthorized'},{status:401})
++ try{
++  const body=await request.json()
++  let rpc:string,payload:Record<string,unknown>
++  if(body.action==='set_kyc'){
++   rpc='admin_set_kyc_status';payload={p_user_id:body.userId,p_status:body.status,p_reason:body.reason}
++  }else if(body.action==='set_account_status'){
++   rpc='admin_set_trading_account_status';payload={p_account_id:body.accountId,p_status:body.status,p_reason:body.reason}
++  }else if(body.action==='resolve_risk'){
++   rpc='admin_resolve_risk_event';payload={p_event_id:body.eventId,p_resolution:body.reason}
++  }else return NextResponse.json({error:'Unsupported operation'},{status:400})
++  const result=await postOwnData(`rpc/${rpc}`,auth.accessToken,payload)
++  return NextResponse.json({ok:true,result})
++ }catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Operation failed'},{status:400})}
++}
+diff --git a/supabase/migrations/20260817220000_admin_operations_and_audit.sql b/supabase/migrations/20260817220000_admin_operations_and_audit.sql
+new file mode 100644
+index 0000000..d883f48
+--- /dev/null
++++ b/supabase/migrations/20260817220000_admin_operations_and_audit.sql
+@@ -0,0 +1,93 @@
++create table if not exists public.admin_audit_log (
++ id uuid primary key default gen_random_uuid(),
++ actor_user_id uuid not null references auth.users(id),
++ action text not null,
++ entity_type text not null,
++ entity_id uuid,
++ before_state jsonb,
++ after_state jsonb,
++ reason text,
++ request_id text,
++ created_at timestamptz not null default now()
++);
++alter table public.risk_events add column if not exists resolved_at timestamptz;
++alter table public.risk_events add column if not exists resolved_by uuid references auth.users(id);
++create index if not exists admin_audit_log_created_idx on public.admin_audit_log(created_at desc);
++create index if not exists admin_audit_log_entity_idx on public.admin_audit_log(entity_type,entity_id,created_at desc);
++alter table public.admin_audit_log enable row level security;
++drop policy if exists "Admins read audit log" on public.admin_audit_log;
++create policy "Admins read audit log" on public.admin_audit_log for select to authenticated using(
++ exists(select 1 from public.user_roles r where r.user_id=(select auth.uid()) and r.role='admin')
++);
++revoke all on public.admin_audit_log from anon;
++revoke insert,update,delete on public.admin_audit_log from authenticated;
++grant select on public.admin_audit_log to authenticated;
++
++drop policy if exists "Admins read all trading accounts" on public.trading_accounts;
++create policy "Admins read all trading accounts" on public.trading_accounts for select to authenticated using(
++ exists(select 1 from public.user_roles r where r.user_id=(select auth.uid()) and r.role='admin')
++);
++drop policy if exists "Admins read all risk events" on public.risk_events;
++create policy "Admins read all risk events" on public.risk_events for select to authenticated using(
++ exists(select 1 from public.user_roles r where r.user_id=(select auth.uid()) and r.role='admin')
++);
++
++create or replace function public.admin_set_kyc_status(p_user_id uuid,p_status text,p_reason text)
++returns public.profiles language plpgsql security definer set search_path=''
++as $function$
++declare v_before public.profiles%rowtype;v_after public.profiles%rowtype;v_actor uuid:=auth.uid();
++begin
++ if not exists(select 1 from public.user_roles where user_id=v_actor and role='admin') then raise exception 'Not authorized'; end if;
++ if p_status not in ('not_started','pending','approved','rejected') then raise exception 'Invalid KYC status'; end if;
++ if p_status in ('approved','rejected') and char_length(trim(coalesce(p_reason,'')))<3 then raise exception 'A review reason is required'; end if;
++ select * into v_before from public.profiles where id=p_user_id for update;
++ if not found then raise exception 'Profile not found'; end if;
++ update public.profiles set kyc_status=p_status,updated_at=now() where id=p_user_id returning * into v_after;
++ insert into public.admin_audit_log(actor_user_id,action,entity_type,entity_id,before_state,after_state,reason)
++ values(v_actor,'kyc_status_changed','profile',p_user_id,to_jsonb(v_before),to_jsonb(v_after),trim(p_reason));
++ insert into public.notifications(user_id,notification_type,title,body,action_url)
++ values(p_user_id,'kyc_'||p_status,'Identity verification updated',case when p_status='approved' then 'Your identity verification is approved.' when p_status='rejected' then 'Your identity verification needs attention: '||trim(p_reason) else 'Your identity verification status is now '||replace(p_status,'_',' ')||'.' end,'/dashboard');
++ return v_after;
++end;$function$;
++
++create or replace function public.admin_set_trading_account_status(p_account_id uuid,p_status text,p_reason text)
++returns public.trading_accounts language plpgsql security definer set search_path=''
++as $function$
++declare v_before public.trading_accounts%rowtype;v_after public.trading_accounts%rowtype;v_actor uuid:=auth.uid();
++begin
++ if not exists(select 1 from public.user_roles where user_id=v_actor and role='admin') then raise exception 'Not authorized'; end if;
++ if p_status not in ('active','suspended','closed') then raise exception 'Invalid account status'; end if;
++ if char_length(trim(coalesce(p_reason,'')))<3 then raise exception 'A reason is required'; end if;
++ select * into v_before from public.trading_accounts where id=p_account_id for update;
++ if not found then raise exception 'Trading account not found'; end if;
++ if v_before.status in ('passed','breached') and p_status='active' then raise exception 'Completed or breached evaluations cannot be reactivated'; end if;
++ update public.trading_accounts set status=p_status,ended_at=case when p_status='closed' then coalesce(ended_at,now()) when p_status='active' then null else ended_at end,updated_at=now()
++ where id=p_account_id returning * into v_after;
++ insert into public.admin_audit_log(actor_user_id,action,entity_type,entity_id,before_state,after_state,reason)
++ values(v_actor,'trading_account_status_changed','trading_account',p_account_id,to_jsonb(v_before),to_jsonb(v_after),trim(p_reason));
++ insert into public.notifications(user_id,notification_type,title,body,action_url)
++ values(v_after.user_id,'account_'||p_status,'Trading account updated','Your account is now '||p_status||'. Reason: '||trim(p_reason),'/dashboard');
++ return v_after;
++end;$function$;
++
++create or replace function public.admin_resolve_risk_event(p_event_id uuid,p_resolution text)
++returns public.risk_events language plpgsql security definer set search_path=''
++as $function$
++declare v_before public.risk_events%rowtype;v_after public.risk_events%rowtype;v_actor uuid:=auth.uid();
++begin
++ if not exists(select 1 from public.user_roles where user_id=v_actor and role='admin') then raise exception 'Not authorized'; end if;
++ if char_length(trim(coalesce(p_resolution,'')))<3 then raise exception 'Resolution note is required'; end if;
++ select * into v_before from public.risk_events where id=p_event_id for update;
++ if not found then raise exception 'Risk event not found'; end if;
++ update public.risk_events set status='resolved',resolved_at=now(),resolved_by=v_actor,details=details||jsonb_build_object('resolution',trim(p_resolution)) where id=p_event_id returning * into v_after;
++ insert into public.admin_audit_log(actor_user_id,action,entity_type,entity_id,before_state,after_state,reason)
++ values(v_actor,'risk_event_resolved','risk_event',p_event_id,to_jsonb(v_before),to_jsonb(v_after),trim(p_resolution));
++ return v_after;
++end;$function$;
++
++revoke all on function public.admin_set_kyc_status(uuid,text,text) from public,anon;
++revoke all on function public.admin_set_trading_account_status(uuid,text,text) from public,anon;
++revoke all on function public.admin_resolve_risk_event(uuid,text) from public,anon;
++grant execute on function public.admin_set_kyc_status(uuid,text,text) to authenticated;
++grant execute on function public.admin_set_trading_account_status(uuid,text,text) to authenticated;
++grant execute on function public.admin_resolve_risk_event(uuid,text) to authenticated;
+-- 
+2.51.1
+

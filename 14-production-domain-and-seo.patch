@@ -1,0 +1,65 @@
+From c0f0f735f53666e9bbd6b575654b8938ce753109 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Mon, 17 Aug 2026 13:20:34 +0200
+Subject: [PATCH] Make production domain metadata configurable
+
+---
+ apps/web/app/layout.tsx      | 3 ++-
+ apps/web/app/robots.ts       | 3 ++-
+ apps/web/app/sitemap.ts      | 3 ++-
+ apps/web/lib/site-url.ts     | 1 +
+ scripts/smoke-production.mjs | 2 +-
+ 5 files changed, 8 insertions(+), 4 deletions(-)
+ create mode 100644 apps/web/lib/site-url.ts
+
+diff --git a/apps/web/app/layout.tsx b/apps/web/app/layout.tsx
+index 44bf4fd..5c90e26 100644
+--- a/apps/web/app/layout.tsx
++++ b/apps/web/app/layout.tsx
+@@ -1,5 +1,6 @@
+ import './styles.css'
+ import './brand.css'
+ import type { Metadata } from 'next'
+-export const metadata: Metadata = { title: 'TakeProp — Trade Crypto. Prove Your Edge. Get Funded.', description: 'Transparent simulated crypto trading evaluations with static risk rules and up to 90% rewards.', applicationName:'TakeProp', icons:{icon:'/icon.png',apple:'/icon.png'}, openGraph:{title:'TakeProp — Take the Challenge. Take the Capital. Take the Profit.',description:'Transparent simulated crypto trading evaluations with static risk rules.',siteName:'TakeProp',type:'website',url:'https://takeprop.vercel.app'} }
++import { siteUrl } from '../lib/site-url'
++export const metadata:Metadata={metadataBase:siteUrl(),title:'TakeProp — Trade Crypto. Prove Your Edge. Get Funded.',description:'Transparent simulated crypto trading evaluations with static risk rules and up to 90% rewards.',applicationName:'TakeProp',icons:{icon:'/icon.png',apple:'/icon.png'},openGraph:{title:'TakeProp — Take the Challenge. Take the Capital. Take the Profit.',description:'Transparent simulated crypto trading evaluations with static risk rules.',siteName:'TakeProp',type:'website',url:'/'}}
+ export default function Layout({children}:{children:React.ReactNode}){return <html lang="en"><body>{children}</body></html>}
+diff --git a/apps/web/app/robots.ts b/apps/web/app/robots.ts
+index 78f4ea8..858fa02 100644
+--- a/apps/web/app/robots.ts
++++ b/apps/web/app/robots.ts
+@@ -1,2 +1,3 @@
+ import { MetadataRoute } from 'next'
+-export default function robots():MetadataRoute.Robots{return{rules:{userAgent:'*',allow:'/',disallow:['/admin','/api','/dashboard','/terminal','/payouts']},sitemap:'https://takeprop.vercel.app/sitemap.xml'}}
++import { siteUrl } from '../lib/site-url'
++export default function robots():MetadataRoute.Robots{return{rules:{userAgent:'*',allow:'/',disallow:['/admin','/api','/dashboard','/terminal','/payouts','/kyc','/notifications']},sitemap:new URL('/sitemap.xml',siteUrl()).toString()}}
+diff --git a/apps/web/app/sitemap.ts b/apps/web/app/sitemap.ts
+index 6d5a077..bc5e839 100644
+--- a/apps/web/app/sitemap.ts
++++ b/apps/web/app/sitemap.ts
+@@ -1,3 +1,4 @@
+ import { MetadataRoute } from 'next'
++import { siteUrl } from '../lib/site-url'
+ const paths=['','/auth','/support','/terms','/privacy','/risk-disclosure','/refund-policy','/aml-kyc']
+-export default function sitemap():MetadataRoute.Sitemap{const lastModified=new Date();return paths.map(path=>({url:`https://takeprop.vercel.app${path}`,lastModified}))}
++export default function sitemap():MetadataRoute.Sitemap{const lastModified=new Date(),base=siteUrl();return paths.map(path=>({url:new URL(path||'/',base).toString(),lastModified}))}
+diff --git a/apps/web/lib/site-url.ts b/apps/web/lib/site-url.ts
+new file mode 100644
+index 0000000..b1a9118
+--- /dev/null
++++ b/apps/web/lib/site-url.ts
+@@ -0,0 +1 @@
++export function siteUrl(){const configured=process.env.NEXT_PUBLIC_SITE_URL?.trim();try{return new URL(configured||'https://takeprop.vercel.app')}catch{return new URL('https://takeprop.vercel.app')}}
+diff --git a/scripts/smoke-production.mjs b/scripts/smoke-production.mjs
+index 7281f9a..ec376fc 100644
+--- a/scripts/smoke-production.mjs
++++ b/scripts/smoke-production.mjs
+@@ -1,4 +1,4 @@
+-const base=(process.env.TAKEPROP_PRODUCTION_URL||'https://takeprop.vercel.app').replace(/\/$/,'')
++const base=(process.env.TAKEPROP_PRODUCTION_URL||process.env.NEXT_PUBLIC_SITE_URL||'https://takeprop.vercel.app').replace(/\/$/,'')
+ const checks=[['/',200],['/auth',200],['/terms',200],['/privacy',200],['/risk-disclosure',200],['/api/health',200]]
+ const failures=[]
+ for(const [path,status] of checks){
+-- 
+2.51.1
+

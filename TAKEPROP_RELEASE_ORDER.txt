@@ -1,0 +1,30 @@
+Upload these 18 files to the TakeProp repository root without renaming them:
+
+01-takeprop-brand-identity.patch
+02-advanced-orders-and-protection.patch
+03-challenge-lifecycle-and-progression.patch
+04-admin-operations-and-audit.patch
+05-notifications-support-and-email.patch
+06-security-automation-and-release-verification.patch
+07-automatic-payment-verification.patch
+08-kyc-provider-integration.patch
+09-support-operations-and-runbooks.patch
+10-nextjs-16-security-upgrade.patch
+11-worker-health-monitoring.patch
+12-legal-consent-and-payout-validation.patch
+13-production-launch-gates.patch
+14-production-domain-and-seo.patch
+15-compliance-and-payout-operations.patch
+APPLY_TAKEPROP_RELEASE.sh
+DEPLOY_TAKEPROP_SUPABASE.sh
+RELEASE_SHA256SUMS
+
+Then run:
+bash APPLY_TAKEPROP_RELEASE.sh
+
+After production environment variables and Supabase secrets are configured, run:
+export SUPABASE_PROJECT_REF=wfbsmkzwnoupquuxnoav
+bash DEPLOY_TAKEPROP_SUPABASE.sh
+
+After Vercel shows Ready, run:
+NEXT_PUBLIC_SITE_URL=https://YOUR_DOMAIN pnpm smoke:production

@@ -1,0 +1,110 @@
+From 67d8367e38036457b3a49df6f36ac9a60ed55044 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Mon, 17 Aug 2026 13:15:02 +0200
+Subject: [PATCH] Record legal consent and validate payout wallets
+
+---
+ apps/web/app/api/auth/register/route.ts       |  9 +++++++--
+ apps/web/app/api/payouts/route.ts             |  3 ++-
+ apps/web/app/auth/legal-checks.css            |  1 +
+ apps/web/app/auth/page.tsx                    | 19 +++++--------------
+ ...legal_acceptance_and_wallet_validation.sql | 12 ++++++++++++
+ 5 files changed, 27 insertions(+), 17 deletions(-)
+ create mode 100644 apps/web/app/auth/legal-checks.css
+ create mode 100644 supabase/migrations/20260818040000_legal_acceptance_and_wallet_validation.sql
+
+diff --git a/apps/web/app/api/auth/register/route.ts b/apps/web/app/api/auth/register/route.ts
+index 66b553b..8c71428 100644
+--- a/apps/web/app/api/auth/register/route.ts
++++ b/apps/web/app/api/auth/register/route.ts
+@@ -1,15 +1,20 @@
+ import { NextResponse } from 'next/server'
++import { createHash } from 'node:crypto'
+ import { authCookies, supabaseConfig } from '../../../../lib/supabase-rest'
+ 
++const LEGAL_VERSION = '2026-08-17'
++
+ export async function POST(request: Request) {
+   try {
+-    const { fullName, email, password } = await request.json()
++    const { fullName, email, password, acceptedTerms, acceptedPrivacy, acceptedRisk, ageConfirmed } = await request.json()
+     if (typeof fullName !== 'string' || fullName.trim().length < 2) return NextResponse.json({ error: 'Enter your full name.' }, { status: 400 })
+     if (typeof email !== 'string' || !email.includes('@')) return NextResponse.json({ error: 'Enter a valid email.' }, { status: 400 })
+     if (typeof password !== 'string' || password.length < 8) return NextResponse.json({ error: 'Password must contain at least 8 characters.' }, { status: 400 })
++    if (!acceptedTerms || !acceptedPrivacy || !acceptedRisk || !ageConfirmed) return NextResponse.json({ error: 'Confirm your eligibility and accept all required legal documents.' }, { status: 400 })
+     const { url, key } = supabaseConfig(); const origin = new URL(request.url).origin
++    const evidence=createHash('sha256').update([request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()||'unknown',request.headers.get('user-agent')||'unknown',process.env.LEGAL_ACCEPTANCE_SALT||'takeprop'].join('|')).digest('hex')
+     const redirectTo=encodeURIComponent(`${origin}/auth?verified=1`)
+-    const authResponse = await fetch(`${url}/auth/v1/signup?redirect_to=${redirectTo}`, { method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim().toLowerCase(), password, data: { full_name: fullName.trim() } }), cache: 'no-store' })
++    const authResponse = await fetch(`${url}/auth/v1/signup?redirect_to=${redirectTo}`, { method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim().toLowerCase(), password, data: { full_name: fullName.trim(),legal_version:LEGAL_VERSION,accepted_terms:true,accepted_privacy:true,accepted_risk:true,age_confirmed:true,legal_accepted_at:new Date().toISOString(),legal_evidence_hash:evidence } }), cache: 'no-store' })
+     const result = await authResponse.json()
+     if (!authResponse.ok) return NextResponse.json({ error: result.msg || result.error_description || 'Unable to create account.' }, { status: authResponse.status })
+     if (!result.access_token) return NextResponse.json({ ok: true, confirmationRequired: true })
+diff --git a/apps/web/app/api/payouts/route.ts b/apps/web/app/api/payouts/route.ts
+index 35102ea..3bc517d 100644
+--- a/apps/web/app/api/payouts/route.ts
++++ b/apps/web/app/api/payouts/route.ts
+@@ -1,4 +1,5 @@
+ import { NextRequest, NextResponse } from 'next/server'
+ import { getAuthenticatedUser, postOwnData } from '../../../lib/supabase-rest'
+ export const dynamic='force-dynamic'
+-export async function POST(request:NextRequest){const auth=await getAuthenticatedUser();if(!auth)return NextResponse.json({error:'Unauthorized'},{status:401});try{const body=await request.json();const result=await postOwnData<unknown>('rpc/request_payout',auth.accessToken,{p_account_id:body.accountId,p_amount:Number(body.amount),p_method:body.method,p_destination_ref:String(body.destination||'').trim()});return NextResponse.json(result)}catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Payout request failed'},{status:400})}}
++const walletPatterns:Record<string,RegExp>={USDT_BEP20:/^0x[a-fA-F0-9]{40}$/,USDT_ERC20:/^0x[a-fA-F0-9]{40}$/,USDT_TRC20:/^T[1-9A-HJ-NP-Za-km-z]{33}$/,USDT_TON:/^(?:UQ|EQ)[A-Za-z0-9_-]{46}$/}
++export async function POST(request:NextRequest){const auth=await getAuthenticatedUser();if(!auth)return NextResponse.json({error:'Unauthorized'},{status:401});try{const body=await request.json(),method=String(body.method||''),destination=String(body.destination||'').trim();if(!walletPatterns[method]?.test(destination))return NextResponse.json({error:'The wallet address does not match the selected payout network.'},{status:400});const result=await postOwnData<unknown>('rpc/request_payout',auth.accessToken,{p_account_id:body.accountId,p_amount:Number(body.amount),p_method:method,p_destination_ref:destination});return NextResponse.json(result)}catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Payout request failed'},{status:400})}}
+diff --git a/apps/web/app/auth/legal-checks.css b/apps/web/app/auth/legal-checks.css
+new file mode 100644
+index 0000000..80e70c6
+--- /dev/null
++++ b/apps/web/app/auth/legal-checks.css
+@@ -0,0 +1 @@
++.legalChecks{display:grid;gap:10px;padding:14px;border:1px solid var(--line);background:#0a1216}.legalChecks label{display:flex;align-items:flex-start;gap:9px;letter-spacing:0;font-size:10px;line-height:1.45}.legalChecks input{width:15px;height:15px;min-width:15px;margin:0;accent-color:var(--green)}.legalChecks a{color:var(--green);text-decoration:underline}
+diff --git a/apps/web/app/auth/page.tsx b/apps/web/app/auth/page.tsx
+index 245fc16..5bb63cf 100644
+--- a/apps/web/app/auth/page.tsx
++++ b/apps/web/app/auth/page.tsx
+@@ -3,19 +3,10 @@
+ import Link from 'next/link'
+ import { FormEvent, useState } from 'react'
+ import './auth.css'
++import './legal-checks.css'
+ 
+-export default function AuthPage() {
+-  const [mode, setMode] = useState<'login' | 'register'>('login')
+-  const [message, setMessage] = useState('')
+-  const [loading, setLoading] = useState(false)
+-  async function submit(event: FormEvent<HTMLFormElement>) {
+-    event.preventDefault(); setLoading(true); setMessage('')
+-    const form = new FormData(event.currentTarget)
+-    const response = await fetch(`/api/auth/${mode}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ fullName: form.get('fullName'), email: form.get('email'), password: form.get('password') }) })
+-    const result = await response.json(); setLoading(false)
+-    if (!response.ok) return setMessage(result.error || 'Something went wrong.')
+-    if (result.confirmationRequired) return setMessage('Check your email to confirm your account, then sign in.')
+-    window.location.href = '/dashboard'
+-  }
+-  return <main className="authPage"><section className="authIntro"><Link className="brand" href="/"><b>TP</b><strong>TakeProp</strong></Link><div><span>SIMULATED TRADING · SECURE ACCESS</span><h1>Your trading journey starts here.</h1><p>Create your account, choose a challenge and track every rule from one transparent dashboard.</p></div><small>Protected by encrypted, HTTP-only session cookies.</small></section><section className="authPanel"><div className="authBox"><span>TRADER ACCESS</span><h2>{mode === 'login' ? 'Welcome back.' : 'Create your account.'}</h2><p>{mode === 'login' ? 'Sign in to your TakeProp dashboard.' : 'One account for challenges, trading and payouts.'}</p><div className="authTabs"><button type="button" className={mode === 'login' ? 'on' : ''} onClick={() => { setMode('login'); setMessage('') }}>Log in</button><button type="button" className={mode === 'register' ? 'on' : ''} onClick={() => { setMode('register'); setMessage('') }}>Register</button></div><form onSubmit={submit}>{mode === 'register' && <label>FULL NAME<input name="fullName" autoComplete="name" minLength={2} required placeholder="Your full name" /></label>}<label>EMAIL<input name="email" type="email" autoComplete="email" required placeholder="you@example.com" /></label><label>PASSWORD<input name="password" type="password" autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={8} required placeholder="At least 8 characters" /></label>{message && <div className="authMessage">{message}</div>}<button className="btn authSubmit" disabled={loading}>{loading ? 'Please wait…' : mode === 'login' ? 'Log in →' : 'Create account →'}</button></form>{mode==='login'&&<Link className="forgot" href="/forgot-password">Forgot your password?</Link>}<small>By creating an account, you agree to TakeProp’s <Link href="/terms">Terms</Link> and <Link href="/privacy">Privacy Policy</Link>.</small></div></section></main>
++export default function AuthPage(){
++ const[mode,setMode]=useState<'login'|'register'>('login'),[message,setMessage]=useState(''),[loading,setLoading]=useState(false)
++ async function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();setLoading(true);setMessage('');const form=new FormData(event.currentTarget),response=await fetch(`/api/auth/${mode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fullName:form.get('fullName'),email:form.get('email'),password:form.get('password'),acceptedTerms:form.get('acceptedTerms')==='on',acceptedPrivacy:form.get('acceptedPrivacy')==='on',acceptedRisk:form.get('acceptedRisk')==='on',ageConfirmed:form.get('ageConfirmed')==='on'})}),result=await response.json();setLoading(false);if(!response.ok)return setMessage(result.error||'Something went wrong.');if(result.confirmationRequired)return setMessage('Check your email to confirm your account, then sign in.');window.location.href='/dashboard'}
++ return <main className="authPage"><section className="authIntro"><Link className="brand" href="/"><b>TP</b><strong>TakeProp</strong></Link><div><span>SIMULATED TRADING · SECURE ACCESS</span><h1>Your trading journey starts here.</h1><p>Create your account, choose a challenge and track every rule from one transparent dashboard.</p></div><small>Protected by encrypted, HTTP-only session cookies.</small></section><section className="authPanel"><div className="authBox"><span>TRADER ACCESS</span><h2>{mode==='login'?'Welcome back.':'Create your account.'}</h2><p>{mode==='login'?'Sign in to your TakeProp dashboard.':'One account for challenges, trading and payouts.'}</p><div className="authTabs"><button type="button" className={mode==='login'?'on':''} onClick={()=>{setMode('login');setMessage('')}}>Log in</button><button type="button" className={mode==='register'?'on':''} onClick={()=>{setMode('register');setMessage('')}}>Register</button></div><form onSubmit={submit}>{mode==='register'&&<label>FULL NAME<input name="fullName" autoComplete="name" minLength={2} required placeholder="Your full name"/></label>}<label>EMAIL<input name="email" type="email" autoComplete="email" required placeholder="you@example.com"/></label><label>PASSWORD<input name="password" type="password" autoComplete={mode==='login'?'current-password':'new-password'} minLength={8} required placeholder="At least 8 characters"/></label>{mode==='register'&&<div className="legalChecks"><label><input type="checkbox" name="ageConfirmed" required/>I confirm that I am at least 18 and eligible to use the service.</label><label><input type="checkbox" name="acceptedTerms" required/>I accept the <Link href="/terms" target="_blank">Terms of Use</Link>.</label><label><input type="checkbox" name="acceptedPrivacy" required/>I acknowledge the <Link href="/privacy" target="_blank">Privacy Notice</Link>.</label><label><input type="checkbox" name="acceptedRisk" required/>I have read the <Link href="/risk-disclosure" target="_blank">Risk Disclosure</Link>.</label></div>}{message&&<div className="authMessage">{message}</div>}<button className="btn authSubmit" disabled={loading}>{loading?'Please wait…':mode==='login'?'Log in →':'Create account →'}</button></form>{mode==='login'&&<Link className="forgot" href="/forgot-password">Forgot your password?</Link>}</div></section></main>
+ }
+diff --git a/supabase/migrations/20260818040000_legal_acceptance_and_wallet_validation.sql b/supabase/migrations/20260818040000_legal_acceptance_and_wallet_validation.sql
+new file mode 100644
+index 0000000..63821a6
+--- /dev/null
++++ b/supabase/migrations/20260818040000_legal_acceptance_and_wallet_validation.sql
+@@ -0,0 +1,12 @@
++-- Immutable legal acceptance evidence and network-specific payout validation.
++create table if not exists public.legal_acceptances(id uuid primary key default gen_random_uuid(),user_id uuid not null references auth.users(id) on delete cascade,document_version text not null,accepted_terms boolean not null,accepted_privacy boolean not null,accepted_risk boolean not null,age_confirmed boolean not null,evidence_hash text not null,accepted_at timestamptz not null,created_at timestamptz not null default now(),unique(user_id,document_version));
++alter table public.legal_acceptances enable row level security;
++create policy "Users read own legal acceptances" on public.legal_acceptances for select to authenticated using(user_id=auth.uid());
++create policy "Admins read legal acceptances" on public.legal_acceptances for select to authenticated using(exists(select 1 from public.user_roles r where r.user_id=auth.uid() and r.role in('admin','compliance')));
++create or replace function public.capture_signup_legal_acceptance() returns trigger language plpgsql security definer set search_path='' as $function$ declare m jsonb:=new.raw_user_meta_data; begin if coalesce((m->>'accepted_terms')::boolean,false) and coalesce((m->>'accepted_privacy')::boolean,false) and coalesce((m->>'accepted_risk')::boolean,false) and coalesce((m->>'age_confirmed')::boolean,false) then insert into public.legal_acceptances(user_id,document_version,accepted_terms,accepted_privacy,accepted_risk,age_confirmed,evidence_hash,accepted_at) values(new.id,coalesce(nullif(m->>'legal_version',''),'unknown'),true,true,true,true,coalesce(nullif(m->>'legal_evidence_hash',''),'unavailable'),coalesce((m->>'legal_accepted_at')::timestamptz,now())) on conflict(user_id,document_version) do nothing; end if; return new; end;$function$;
++drop trigger if exists capture_signup_legal_acceptance on auth.users;
++create trigger capture_signup_legal_acceptance after insert on auth.users for each row execute function public.capture_signup_legal_acceptance();
++create or replace function public.valid_payout_destination(p_method text,p_address text) returns boolean language sql immutable set search_path='' as $function$ select case when p_method in('USDT_BEP20','USDT_ERC20') then p_address ~ '^0x[0-9A-Fa-f]{40}$' when p_method='USDT_TRC20' then p_address ~ '^T[1-9A-HJ-NP-Za-km-z]{33}$' when p_method='USDT_TON' then p_address ~ '^(UQ|EQ)[A-Za-z0-9_-]{46}$' else false end $function$;
++create or replace function public.enforce_payout_destination() returns trigger language plpgsql set search_path='' as $function$ begin if not public.valid_payout_destination(new.method,new.destination_ref) then raise exception 'Destination address does not match payout network'; end if; return new; end;$function$;
++drop trigger if exists validate_payout_destination on public.payout_requests;
++create trigger validate_payout_destination before insert or update of method,destination_ref on public.payout_requests for each row execute function public.enforce_payout_destination();
+-- 
+2.51.1
+

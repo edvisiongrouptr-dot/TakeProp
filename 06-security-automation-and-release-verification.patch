@@ -1,0 +1,384 @@
+From 251825ce6a13093923fd7215aa0d8ec814bd3df1 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Mon, 17 Aug 2026 12:56:28 +0200
+Subject: [PATCH] Harden security automation and release verification
+
+---
+ .env.example                                  |  9 ++++
+ .github/workflows/ci.yml                      | 23 ++++++++++
+ apps/web/app/api/cron/email/route.ts          | 17 ++++++++
+ apps/web/app/api/cron/orders/route.ts         | 14 +++++++
+ apps/web/app/api/health/route.ts              | 15 ++++++-
+ apps/web/middleware.ts                        | 27 +++++++++++-
+ apps/web/next.config.js                       |  5 ++-
+ apps/web/vercel.json                          |  7 ++++
+ package.json                                  |  4 +-
+ scripts/smoke-production.mjs                  | 12 ++++++
+ scripts/verify-release.mjs                    | 19 +++++++++
+ .../functions/process-active-orders/index.ts  | 30 +++++++++++++
+ supabase/functions/sim-trading/index.ts       |  8 ++++
+ .../20260818000000_security_rate_limits.sql   | 42 +++++++++++++++++++
+ 14 files changed, 227 insertions(+), 5 deletions(-)
+ create mode 100644 .github/workflows/ci.yml
+ create mode 100644 apps/web/app/api/cron/email/route.ts
+ create mode 100644 apps/web/app/api/cron/orders/route.ts
+ create mode 100644 apps/web/vercel.json
+ create mode 100644 scripts/smoke-production.mjs
+ create mode 100644 scripts/verify-release.mjs
+ create mode 100644 supabase/functions/process-active-orders/index.ts
+ create mode 100644 supabase/migrations/20260818000000_security_rate_limits.sql
+
+diff --git a/.env.example b/.env.example
+index 430e5a7..3730fde 100644
+--- a/.env.example
++++ b/.env.example
+@@ -13,3 +13,12 @@ FEATURE_FLAGS_FREE_TRIAL_ENABLED=true
+ FEATURE_FLAGS_PAID_CHECKOUT_ENABLED=true
+ FEATURE_FLAGS_PAYOUTS_ENABLED=true
+ FOUNDING_EDITION_CAP=100
++
++# Server-only production operations. Never prefix these with NEXT_PUBLIC_.
++HEALTHCHECK_SECRET=replace_with_32_or_more_random_characters
++CRON_SECRET=replace_with_32_or_more_random_characters
++EMAIL_WORKER_SECRET=replace_with_32_or_more_random_characters
++ORDER_WORKER_SECRET=replace_with_32_or_more_random_characters
++RESEND_API_KEY=re_replace_me
++EMAIL_FROM=TakeProp <operations@example.com>
++ALERT_WEBHOOK_URL=
+diff --git a/.github/workflows/ci.yml b/.github/workflows/ci.yml
+new file mode 100644
+index 0000000..d6346e8
+--- /dev/null
++++ b/.github/workflows/ci.yml
+@@ -0,0 +1,23 @@
++name: production-readiness
++on:
++  push:
++    branches: [main]
++  pull_request:
++jobs:
++  verify:
++    runs-on: ubuntu-latest
++    steps:
++      - uses: actions/checkout@v4
++      - uses: pnpm/action-setup@v4
++        with:
++          version: 10.28.0
++      - uses: actions/setup-node@v4
++        with:
++          node-version: 20
++          cache: pnpm
++      - run: pnpm install --frozen-lockfile
++      - run: pnpm verify:release
++      - run: pnpm --filter web build
++        env:
++          NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
++          NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_placeholder
+diff --git a/apps/web/app/api/cron/email/route.ts b/apps/web/app/api/cron/email/route.ts
+new file mode 100644
+index 0000000..0bdb8c2
+--- /dev/null
++++ b/apps/web/app/api/cron/email/route.ts
+@@ -0,0 +1,17 @@
++import { NextRequest,NextResponse } from 'next/server'
++
++export const dynamic='force-dynamic'
++
++export async function GET(request:NextRequest){
++ const cronSecret=process.env.CRON_SECRET
++ if(!cronSecret||request.headers.get('authorization')!==`Bearer ${cronSecret}`)return NextResponse.json({error:'Unauthorized'},{status:401})
++ const url=process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/,'')
++ const key=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
++ const workerSecret=process.env.EMAIL_WORKER_SECRET
++ if(!url||!key||!workerSecret)return NextResponse.json({error:'Email worker is not configured.'},{status:503})
++ try{
++  const response=await fetch(`${url}/functions/v1/send-email-outbox`,{method:'POST',headers:{apikey:key,Authorization:`Bearer ${workerSecret}`,'Content-Type':'application/json'},body:'{}',cache:'no-store',signal:AbortSignal.timeout(25_000)})
++  const result=await response.json().catch(()=>({error:'Invalid worker response'}))
++  return NextResponse.json(result,{status:response.status})
++ }catch{return NextResponse.json({error:'Email worker unavailable.'},{status:503})}
++}
+diff --git a/apps/web/app/api/cron/orders/route.ts b/apps/web/app/api/cron/orders/route.ts
+new file mode 100644
+index 0000000..4c9d11c
+--- /dev/null
++++ b/apps/web/app/api/cron/orders/route.ts
+@@ -0,0 +1,14 @@
++import {NextRequest,NextResponse} from 'next/server'
++export const dynamic='force-dynamic'
++export async function GET(request:NextRequest){
++ if(!process.env.CRON_SECRET||request.headers.get('authorization')!==`Bearer ${process.env.CRON_SECRET}`)return NextResponse.json({error:'Unauthorized'},{status:401})
++ const url=process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/,'')
++ const key=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
++ const secret=process.env.ORDER_WORKER_SECRET
++ if(!url||!key||!secret)return NextResponse.json({error:'Order worker is not configured.'},{status:503})
++ try{
++  const response=await fetch(`${url}/functions/v1/process-active-orders`,{method:'POST',headers:{apikey:key,Authorization:`Bearer ${secret}`},cache:'no-store',signal:AbortSignal.timeout(50_000)})
++  const result=await response.json().catch(()=>({error:'Invalid worker response'}))
++  return NextResponse.json(result,{status:response.status})
++ }catch{return NextResponse.json({error:'Order worker unavailable.'},{status:503})}
++}
+diff --git a/apps/web/app/api/health/route.ts b/apps/web/app/api/health/route.ts
+index c6e7760..6f10332 100644
+--- a/apps/web/app/api/health/route.ts
++++ b/apps/web/app/api/health/route.ts
+@@ -1,3 +1,14 @@
+-import { NextResponse } from 'next/server'
++import { NextRequest,NextResponse } from 'next/server'
+ export const dynamic='force-dynamic'
+-export async function GET(){return NextResponse.json({ok:true,service:'takeprop-web',time:new Date().toISOString()},{headers:{'Cache-Control':'no-store'}})}
++export async function GET(request:NextRequest){
++ const deep=request.nextUrl.searchParams.get('deep')==='1'
++ if(!deep)return NextResponse.json({ok:true,service:'takeprop-web',time:new Date().toISOString()},{headers:{'Cache-Control':'no-store'}})
++ if(!process.env.HEALTHCHECK_SECRET||request.headers.get('authorization')!==`Bearer ${process.env.HEALTHCHECK_SECRET}`)return NextResponse.json({error:'Unauthorized'},{status:401})
++ const url=process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/,'')
++ const key=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
++ if(!url||!key)return NextResponse.json({ok:false,service:'takeprop-web',database:'not-configured'},{status:503})
++ try{
++  const started=Date.now(),response=await fetch(`${url}/rest/v1/`,{headers:{apikey:key},cache:'no-store',signal:AbortSignal.timeout(5000)})
++  return NextResponse.json({ok:response.ok,service:'takeprop-web',database:response.ok?'reachable':'unavailable',latencyMs:Date.now()-started},{status:response.ok?200:503,headers:{'Cache-Control':'no-store'}})
++ }catch{return NextResponse.json({ok:false,service:'takeprop-web',database:'unavailable'},{status:503,headers:{'Cache-Control':'no-store'}})}
++}
+diff --git a/apps/web/middleware.ts b/apps/web/middleware.ts
+index daa5077..813b4f1 100644
+--- a/apps/web/middleware.ts
++++ b/apps/web/middleware.ts
+@@ -1,8 +1,33 @@
+ import { NextRequest, NextResponse } from 'next/server'
+ 
+ const accessName='takeprop-access-token',refreshName='takeprop-refresh-token'
++const windows=new Map<string,{count:number;resetAt:number}>()
++
++function requestKey(request:NextRequest){
++ const forwarded=request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
++ return `${forwarded||request.ip||'unknown'}:${request.nextUrl.pathname}`
++}
++
++function enforceRequestSecurity(request:NextRequest){
++ if(!request.nextUrl.pathname.startsWith('/api/'))return null
++ const mutation=!['GET','HEAD','OPTIONS'].includes(request.method)
++ if(mutation&&!request.nextUrl.pathname.startsWith('/api/cron/')){
++  const origin=request.headers.get('origin')
++  if(origin&&origin!==request.nextUrl.origin)return NextResponse.json({error:'Invalid request origin.'},{status:403})
++ }
++ const now=Date.now(),key=requestKey(request),current=windows.get(key)
++ if(!current||current.resetAt<=now)windows.set(key,{count:1,resetAt:now+60_000})
++ else{
++  current.count+=1
++  if(current.count>60)return NextResponse.json({error:'Too many requests. Please try again shortly.'},{status:429,headers:{'Retry-After':String(Math.ceil((current.resetAt-now)/1000))}})
++ }
++ return null
++}
+ 
+ export async function middleware(request:NextRequest){
++ const securityResponse=enforceRequestSecurity(request)
++ if(securityResponse)return securityResponse
++ if(request.nextUrl.pathname.startsWith('/api/'))return NextResponse.next()
+  const access=request.cookies.get(accessName)?.value,refresh=request.cookies.get(refreshName)?.value
+  const url=process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/,'')
+  const key=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+@@ -23,4 +48,4 @@ export async function middleware(request:NextRequest){
+  const response=NextResponse.redirect(new URL('/auth',request.url));response.cookies.delete(accessName);response.cookies.delete(refreshName);return response
+ }
+ 
+-export const config={matcher:['/dashboard/:path*','/terminal/:path*','/payouts/:path*','/admin/:path*']}
++export const config={matcher:['/dashboard/:path*','/terminal/:path*','/payouts/:path*','/admin/:path*','/support/:path*','/notifications/:path*','/api/:path*']}
+diff --git a/apps/web/next.config.js b/apps/web/next.config.js
+index 14a4ffb..649946f 100644
+--- a/apps/web/next.config.js
++++ b/apps/web/next.config.js
+@@ -1,15 +1,18 @@
++const scriptPolicy=process.env.NODE_ENV==='production'?"script-src 'self' 'unsafe-inline'":"script-src 'self' 'unsafe-inline' 'unsafe-eval'"
+ /** @type {import('next').NextConfig} */
+ const nextConfig={
+  poweredByHeader:false,
+  async headers(){return[{source:'/:path*',headers:[
+   {key:'X-Content-Type-Options',value:'nosniff'},
++  {key:'X-DNS-Prefetch-Control',value:'off'},
+   {key:'X-Frame-Options',value:'DENY'},
++  {key:'X-Permitted-Cross-Domain-Policies',value:'none'},
+   {key:'Strict-Transport-Security',value:'max-age=63072000; includeSubDomains; preload'},
+   {key:'Cross-Origin-Opener-Policy',value:'same-origin'},
+   {key:'Cross-Origin-Resource-Policy',value:'same-origin'},
+   {key:'Referrer-Policy',value:'strict-origin-when-cross-origin'},
+   {key:'Permissions-Policy',value:'camera=(), microphone=(), geolocation=()'},
+-  {key:'Content-Security-Policy',value:"default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; upgrade-insecure-requests"}
++  {key:'Content-Security-Policy',value:`default-src 'self'; ${scriptPolicy}; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' https://*.supabase.co; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'; upgrade-insecure-requests`}
+  ]}]}
+ }
+ module.exports=nextConfig
+diff --git a/apps/web/vercel.json b/apps/web/vercel.json
+new file mode 100644
+index 0000000..7a95b6d
+--- /dev/null
++++ b/apps/web/vercel.json
+@@ -0,0 +1,7 @@
++{
++  "$schema": "https://openapi.vercel.sh/vercel.json",
++  "crons": [
++    { "path": "/api/cron/email", "schedule": "*/5 * * * *" },
++    { "path": "/api/cron/orders", "schedule": "* * * * *" }
++  ]
++}
+diff --git a/package.json b/package.json
+index 57188ef..7c1484b 100644
+--- a/package.json
++++ b/package.json
+@@ -10,6 +10,8 @@
+     "dev": "pnpm -w -r run dev",
+     "build": "pnpm -w -r run build",
+     "lint": "pnpm -w -r run lint",
+-    "test": "pnpm -w -r run test"
++    "test": "pnpm -w -r run test",
++    "verify:release": "node scripts/verify-release.mjs",
++    "smoke:production": "node scripts/smoke-production.mjs"
+   }
+ }
+diff --git a/scripts/smoke-production.mjs b/scripts/smoke-production.mjs
+new file mode 100644
+index 0000000..7281f9a
+--- /dev/null
++++ b/scripts/smoke-production.mjs
+@@ -0,0 +1,12 @@
++const base=(process.env.TAKEPROP_PRODUCTION_URL||'https://takeprop.vercel.app').replace(/\/$/,'')
++const checks=[['/',200],['/auth',200],['/terms',200],['/privacy',200],['/risk-disclosure',200],['/api/health',200]]
++const failures=[]
++for(const [path,status] of checks){
++ try{
++  const response=await fetch(`${base}${path}`,{redirect:'manual',signal:AbortSignal.timeout(15_000)})
++  if(response.status!==status)failures.push(`${path}: expected ${status}, received ${response.status}`)
++  else console.log(`OK ${path}`)
++ }catch(error){failures.push(`${path}: ${error instanceof Error?error.message:'request failed'}`)}
++}
++if(failures.length){console.error(failures.join('\n'));process.exit(1)}
++console.log(`Production smoke checks passed for ${base}.`)
+diff --git a/scripts/verify-release.mjs b/scripts/verify-release.mjs
+new file mode 100644
+index 0000000..fa9e1f0
+--- /dev/null
++++ b/scripts/verify-release.mjs
+@@ -0,0 +1,19 @@
++import {access,readFile} from 'node:fs/promises'
++
++const required=[
++ 'apps/web/app/page.tsx','apps/web/app/auth/page.tsx','apps/web/app/dashboard/page.tsx',
++ 'apps/web/app/terminal/page.tsx','apps/web/app/admin/page.tsx','apps/web/app/support/page.tsx',
++ 'apps/web/app/terms/page.tsx','apps/web/app/privacy/page.tsx','apps/web/app/risk-disclosure/page.tsx',
++ 'apps/web/middleware.ts','apps/web/vercel.json','supabase/functions/sim-trading/index.ts',
++ 'supabase/functions/send-email-outbox/index.ts','supabase/functions/process-active-orders/index.ts'
++]
++const failures=[]
++for(const file of required)try{await access(file)}catch{failures.push(`Missing ${file}`)}
++const env=await readFile('.env.example','utf8')
++for(const name of ['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY','HEALTHCHECK_SECRET','CRON_SECRET','EMAIL_WORKER_SECRET','ORDER_WORKER_SECRET','RESEND_API_KEY'])if(!env.includes(`${name}=`))failures.push(`Missing env template ${name}`)
++for(const file of ['apps/web/app/api/admin/operations/route.ts','apps/web/app/api/trading/route.ts']){
++ const source=await readFile(file,'utf8')
++ if(source.includes('SUPABASE_SERVICE_ROLE')||source.includes('service_role'))failures.push(`Service role reference in web route ${file}`)
++}
++if(failures.length){console.error(failures.join('\n'));process.exit(1)}
++console.log(`Release structure verified (${required.length} required files).`)
+diff --git a/supabase/functions/process-active-orders/index.ts b/supabase/functions/process-active-orders/index.ts
+new file mode 100644
+index 0000000..3827f49
+--- /dev/null
++++ b/supabase/functions/process-active-orders/index.ts
+@@ -0,0 +1,30 @@
++const symbols=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT'] as const
++const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}})
++function secret(name:string,fallback:string){const direct=Deno.env.get(name);if(direct)return direct;const raw=Deno.env.get(fallback)||'';try{const parsed=JSON.parse(raw);return String(parsed.default||Object.values(parsed)[0]||'')}catch{return raw}}
++async function fetchJson(url:string){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),4500);try{const response=await fetch(url,{signal:controller.signal,headers:{'user-agent':'TakeProp-Order-Worker/1.0'}});if(!response.ok)throw new Error(`HTTP ${response.status}`);return await response.json()}finally{clearTimeout(timer)}}
++async function prices(){
++ const sources=await Promise.allSettled([
++  fetchJson('https://min-api.cryptocompare.com/data/pricemulti?fsyms=BTC,ETH,SOL,BNB&tsyms=USDT').then(x=>({BTCUSDT:+x?.BTC?.USDT,ETHUSDT:+x?.ETH?.USDT,SOLUSDT:+x?.SOL?.USDT,BNBUSDT:+x?.BNB?.USDT})),
++  fetchJson('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,binancecoin,tether&vs_currencies=usd').then(x=>{const peg=+x?.tether?.usd||1;return{BTCUSDT:+x?.bitcoin?.usd/peg,ETHUSDT:+x?.ethereum?.usd/peg,SOLUSDT:+x?.solana?.usd/peg,BNBUSDT:+x?.binancecoin?.usd/peg}})
++ ])
++ const valid=sources.flatMap(x=>x.status==='fulfilled'?[x.value]:[]);if(!valid.length)throw new Error('Market data unavailable')
++ const marks:Record<string,number>={};for(const symbol of symbols){const values=valid.map(x=>+x[symbol]).filter(x=>Number.isFinite(x)&&x>0).sort((a,b)=>a-b);if(!values.length)throw new Error(`Missing ${symbol}`);const mark=values.length>1?(values[0]+values[1])/2:values[0];if(values.length>1&&(values[1]-values[0])/mark>.015)throw new Error(`Divergent ${symbol}`);marks[symbol]=mark}return marks
++}
++Deno.serve(async request=>{
++ if(request.method!=='POST')return json({error:'Method not allowed'},405)
++ const expected=Deno.env.get('ORDER_WORKER_SECRET')||''
++ if(!expected||request.headers.get('authorization')!==`Bearer ${expected}`)return json({error:'Unauthorized'},401)
++ const url=Deno.env.get('SUPABASE_URL')||'',serviceKey=secret('SUPABASE_SERVICE_ROLE_KEY','SUPABASE_SECRET_KEYS')
++ if(!url||!serviceKey)return json({error:'Worker is not configured'},503)
++ try{
++  const marks=await prices()
++  const accountsResponse=await fetch(`${url}/rest/v1/trading_accounts?status=eq.active&select=id,user_id&limit=1000`,{headers:{apikey:serviceKey,authorization:`Bearer ${serviceKey}`}})
++  if(!accountsResponse.ok)throw new Error('Unable to load active accounts')
++  const accounts=await accountsResponse.json(),failures=[] as string[]
++  for(const account of accounts){
++   const response=await fetch(`${url}/rest/v1/rpc/internal_advanced_snapshot`,{method:'POST',headers:{apikey:serviceKey,authorization:`Bearer ${serviceKey}`,'content-type':'application/json'},body:JSON.stringify({p_user_id:account.user_id,p_account_id:account.id,p_marks:marks})})
++   if(response.ok){await fetch(`${url}/rest/v1/rpc/internal_finalize_sim_account`,{method:'POST',headers:{apikey:serviceKey,authorization:`Bearer ${serviceKey}`,'content-type':'application/json'},body:JSON.stringify({p_user_id:account.user_id,p_account_id:account.id,p_marks:marks})})}else failures.push(account.id)
++  }
++  return json({ok:failures.length===0,processed:accounts.length,failed:failures.length,serverTime:new Date().toISOString()},failures.length?207:200)
++ }catch(error){return json({error:error instanceof Error?error.message:'Order processing failed'},503)}
++})
+diff --git a/supabase/functions/sim-trading/index.ts b/supabase/functions/sim-trading/index.ts
+index ce20400..72fc4f5 100644
+--- a/supabase/functions/sim-trading/index.ts
++++ b/supabase/functions/sim-trading/index.ts
+@@ -61,6 +61,14 @@ Deno.serve(async (req: Request) => {
+     const accountId = String(body.accountId || "");
+     if (!accountId) return json({ error: "Account is required" }, 400);
+ 
++    const limitRes = await fetch(`${supabaseUrl}/rest/v1/rpc/internal_consume_rate_limit`, {
++      method: "POST",
++      headers: { apikey: serviceKey, authorization: `Bearer ${serviceKey}`, "content-type": "application/json" },
++      body: JSON.stringify({ p_scope: `sim-trading:${action}`, p_subject_hash: `${user.id}:${accountId}`, p_limit: action === "snapshot" ? 30 : 12, p_window_seconds: 60 }),
++    });
++    const allowed = await limitRes.json().catch(() => false);
++    if (!limitRes.ok || allowed !== true) return json({ error: "Too many trading requests. Please wait and retry." }, 429);
++
+     const market = await allMarkPrices();
+     const marks = market.marks;
+     let rpc = "internal_advanced_snapshot";
+diff --git a/supabase/migrations/20260818000000_security_rate_limits.sql b/supabase/migrations/20260818000000_security_rate_limits.sql
+new file mode 100644
+index 0000000..1bf9758
+--- /dev/null
++++ b/supabase/migrations/20260818000000_security_rate_limits.sql
+@@ -0,0 +1,42 @@
++begin;
++
++create table if not exists public.request_rate_limits (
++  scope text not null,
++  subject_hash text not null,
++  window_started_at timestamptz not null default now(),
++  request_count integer not null default 0 check (request_count >= 0),
++  primary key (scope, subject_hash)
++);
++
++alter table public.request_rate_limits enable row level security;
++revoke all on public.request_rate_limits from anon, authenticated;
++
++create or replace function public.internal_consume_rate_limit(
++  p_scope text,
++  p_subject_hash text,
++  p_limit integer,
++  p_window_seconds integer
++) returns boolean
++language plpgsql
++security definer
++set search_path = public, pg_temp
++as $$
++declare v_row public.request_rate_limits%rowtype;
++begin
++  if p_limit < 1 or p_window_seconds < 1 or length(p_scope) > 80 or length(p_subject_hash) > 160 then
++    raise exception 'Invalid rate limit configuration';
++  end if;
++  insert into public.request_rate_limits(scope,subject_hash,window_started_at,request_count)
++  values(p_scope,p_subject_hash,now(),1)
++  on conflict(scope,subject_hash) do update set
++    window_started_at=case when public.request_rate_limits.window_started_at <= now()-make_interval(secs=>p_window_seconds) then now() else public.request_rate_limits.window_started_at end,
++    request_count=case when public.request_rate_limits.window_started_at <= now()-make_interval(secs=>p_window_seconds) then 1 else public.request_rate_limits.request_count+1 end
++  returning * into v_row;
++  return v_row.request_count <= p_limit;
++end;
++$$;
++
++revoke all on function public.internal_consume_rate_limit(text,text,integer,integer) from public,anon,authenticated;
++grant execute on function public.internal_consume_rate_limit(text,text,integer,integer) to service_role;
++
++commit;
+-- 
+2.51.1
+

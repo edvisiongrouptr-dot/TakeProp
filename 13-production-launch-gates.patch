@@ -1,0 +1,135 @@
+From 5319448da8b9352bd9977c4f46413f2da15f55aa Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Mon, 17 Aug 2026 13:16:58 +0200
+Subject: [PATCH] Add final production launch gates
+
+---
+ .env.example                   |  2 ++
+ docs/LAUNCH_CHECKLIST.md       | 29 +++++++++++++++++++++++++++++
+ docs/PRODUCTION_RUNBOOK.md     |  2 +-
+ package.json                   |  1 +
+ scripts/verify-environment.mjs | 11 +++++++++++
+ scripts/verify-release.mjs     |  5 +++--
+ 6 files changed, 47 insertions(+), 3 deletions(-)
+ create mode 100644 docs/LAUNCH_CHECKLIST.md
+ create mode 100644 scripts/verify-environment.mjs
+
+diff --git a/.env.example b/.env.example
+index 16a29c1..eeacd8a 100644
+--- a/.env.example
++++ b/.env.example
+@@ -20,6 +20,7 @@ CRON_SECRET=replace_with_32_or_more_random_characters
+ EMAIL_WORKER_SECRET=replace_with_32_or_more_random_characters
+ ORDER_WORKER_SECRET=replace_with_32_or_more_random_characters
+ PAYMENT_WORKER_SECRET=replace_with_32_or_more_random_characters
++LEGAL_ACCEPTANCE_SALT=replace_with_32_or_more_random_characters
+ PAYMENT_VERIFICATION_API_URL=https://your-verification-provider.example/v1/verify-usdt
+ PAYMENT_VERIFICATION_API_TOKEN=replace_me
+ KYC_PROVIDER_API_URL=https://your-kyc-provider.example/v1
+@@ -28,3 +29,4 @@ KYC_WEBHOOK_SECRET=replace_with_32_or_more_random_characters
+ RESEND_API_KEY=re_replace_me
+ EMAIL_FROM=TakeProp <operations@example.com>
+ ALERT_WEBHOOK_URL=
++NEXT_PUBLIC_SITE_URL=https://takeprop.com
+diff --git a/docs/LAUNCH_CHECKLIST.md b/docs/LAUNCH_CHECKLIST.md
+new file mode 100644
+index 0000000..489eeb1
+--- /dev/null
++++ b/docs/LAUNCH_CHECKLIST.md
+@@ -0,0 +1,29 @@
++# TakeProp launch checklist
++
++## Automated technical gate
++
++- Install dependencies with `pnpm install --no-frozen-lockfile` and commit the regenerated lockfile.
++- Run `pnpm verify:release`, `pnpm verify:environment`, and `pnpm --filter web build`.
++- Apply every Supabase migration in timestamp order and deploy all five Edge Functions.
++- Verify `/api/health?deep=1` with the health secret and run `pnpm smoke:production` against production.
++- Confirm order, payment and email worker heartbeats are current in Operations Center.
++
++## End-to-end acceptance gate
++
++- New registration requires age, Terms, Privacy and Risk acceptance; confirmation and recovery email links return to the production domain.
++- Purchase verifies the exact USDT network, contract, recipient, amount, confirmations and unique TXID before account provisioning.
++- One-Step and Two-Step accounts progress only after profit target and minimum trading days, and breach daily/static loss using open equity.
++- Market, limit and stop orders; stop-loss/take-profit; fees; position close; history and disconnect-safe server execution are tested.
++- KYC blocks rewards until approval. Payout wallet format matches the selected chain and Operations records the final payout TXID.
++- Admin, finance, support and compliance permissions are tested with separate least-privilege accounts; audit events cannot be edited by operators.
++
++## Operator-owned launch blockers
++
++- Counsel approves entity name, supported/prohibited jurisdictions, Terms, Privacy, Risk, Refund and AML/KYC text.
++- KYC, blockchain verification, email and monitoring provider contracts are active with production credentials.
++- SPF, DKIM and DMARC pass; custom domain, redirects, TLS, Supabase URL allow-list and authentication email templates use the production domain.
++- Supabase point-in-time recovery/backups are enabled and a restore rehearsal is documented.
++- A scheduler or dedicated worker runs conditional-order and payment verification jobs at the required cadence.
++- Incident contacts, customer support coverage, payout wallet custody/approval policy and credential rotation owners are assigned.
++
++Paid public traffic must remain disabled until every operator-owned blocker is signed off. Code cannot substitute for legal approval, provider contracts, wallet custody or production credentials.
+diff --git a/docs/PRODUCTION_RUNBOOK.md b/docs/PRODUCTION_RUNBOOK.md
+index 3f14dec..3703371 100644
+--- a/docs/PRODUCTION_RUNBOOK.md
++++ b/docs/PRODUCTION_RUNBOOK.md
+@@ -5,7 +5,7 @@
+ 1. Apply numbered patches in order and run every new Supabase migration.
+ 2. Deploy `sim-trading`, `process-active-orders`, `verify-usdt-payments`, `send-email-outbox`, and `kyc` Edge Functions.
+ 3. Configure every variable listed in `.env.example` in Vercel and the matching worker secrets in Supabase.
+-4. Run `pnpm install --frozen-lockfile`, `pnpm verify:release`, and `pnpm --filter web build`.
++4. Run `pnpm install --no-frozen-lockfile`, commit the regenerated `pnpm-lock.yaml`, then run `pnpm verify:release`, `pnpm verify:environment`, and `pnpm --filter web build`.
+ 5. Deploy a preview, complete registration, recovery, payment, KYC, trading, breach, progression, payout and support acceptance tests.
+ 6. Promote only a tested immutable deployment to production, then run `pnpm smoke:production`.
+ 
+diff --git a/package.json b/package.json
+index 7c1484b..385dce7 100644
+--- a/package.json
++++ b/package.json
+@@ -12,6 +12,7 @@
+     "lint": "pnpm -w -r run lint",
+     "test": "pnpm -w -r run test",
+     "verify:release": "node scripts/verify-release.mjs",
++    "verify:environment": "node scripts/verify-environment.mjs",
+     "smoke:production": "node scripts/smoke-production.mjs"
+   }
+ }
+diff --git a/scripts/verify-environment.mjs b/scripts/verify-environment.mjs
+new file mode 100644
+index 0000000..1ba1318
+--- /dev/null
++++ b/scripts/verify-environment.mjs
+@@ -0,0 +1,11 @@
++const requiredPublic=['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY','NEXT_PUBLIC_SITE_URL']
++const requiredSecrets=['HEALTHCHECK_SECRET','CRON_SECRET','EMAIL_WORKER_SECRET','ORDER_WORKER_SECRET','PAYMENT_WORKER_SECRET','LEGAL_ACCEPTANCE_SALT','PAYMENT_VERIFICATION_API_TOKEN','KYC_PROVIDER_API_TOKEN','KYC_WEBHOOK_SECRET','RESEND_API_KEY']
++const requiredUrls=['PAYMENT_VERIFICATION_API_URL','KYC_PROVIDER_API_URL']
++const failures=[]
++for(const name of [...requiredPublic,...requiredSecrets,...requiredUrls]){const value=process.env[name]?.trim();if(!value)failures.push(`${name} is missing`);else if(/replace|example|your-|localhost/i.test(value))failures.push(`${name} still contains a placeholder`)}
++for(const name of requiredSecrets){const value=process.env[name]?.trim()||'';if(value&&value.length<32)failures.push(`${name} must contain at least 32 characters`)}
++for(const name of ['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SITE_URL',...requiredUrls]){const value=process.env[name];if(value)try{const url=new URL(value);if(url.protocol!=='https:')failures.push(`${name} must use HTTPS`)}catch{failures.push(`${name} is not a valid URL`)}}
++if(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY&&!/^(sb_publishable_|eyJ)/.test(process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY))failures.push('NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY has an unexpected format')
++if(!/^.+<[^<>\s]+@[^<>\s]+>$/.test(process.env.EMAIL_FROM||''))failures.push('EMAIL_FROM must look like: TakeProp <operations@takeprop.com>')
++if(failures.length){console.error(`Production environment is not ready:\n- ${failures.join('\n- ')}`);process.exit(1)}
++console.log('Production environment variables passed structural validation. Secret values were not printed.')
+diff --git a/scripts/verify-release.mjs b/scripts/verify-release.mjs
+index debcecb..097ef09 100644
+--- a/scripts/verify-release.mjs
++++ b/scripts/verify-release.mjs
+@@ -5,14 +5,15 @@ const required=[
+  'apps/web/app/terminal/page.tsx','apps/web/app/admin/page.tsx','apps/web/app/support/page.tsx','apps/web/app/kyc/page.tsx',
+  'apps/web/app/terms/page.tsx','apps/web/app/privacy/page.tsx','apps/web/app/risk-disclosure/page.tsx',
+  'apps/web/proxy.ts','apps/web/vercel.json','supabase/functions/sim-trading/index.ts',
+- 'supabase/functions/send-email-outbox/index.ts','supabase/functions/process-active-orders/index.ts','supabase/functions/verify-usdt-payments/index.ts','supabase/functions/kyc/index.ts'
++ 'supabase/functions/send-email-outbox/index.ts','supabase/functions/process-active-orders/index.ts','supabase/functions/verify-usdt-payments/index.ts','supabase/functions/kyc/index.ts',
++ 'supabase/migrations/20260818000000_security_rate_limits.sql','supabase/migrations/20260818010000_automatic_payment_verification.sql','supabase/migrations/20260818020000_kyc_provider_integration.sql','supabase/migrations/20260818030000_worker_health_monitoring.sql','supabase/migrations/20260818040000_legal_acceptance_and_wallet_validation.sql'
+ ]
+ const failures=[]
+ for(const file of required)try{await access(file)}catch{failures.push(`Missing ${file}`)}
+ const env=await readFile('.env.example','utf8')
+ const webPackage=JSON.parse(await readFile('apps/web/package.json','utf8'))
+ if(!String(webPackage.dependencies?.next||'').startsWith('16.2.'))failures.push('Next.js must remain on the reviewed 16.2 LTS line')
+-for(const name of ['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY','HEALTHCHECK_SECRET','CRON_SECRET','EMAIL_WORKER_SECRET','ORDER_WORKER_SECRET','PAYMENT_WORKER_SECRET','PAYMENT_VERIFICATION_API_URL','PAYMENT_VERIFICATION_API_TOKEN','KYC_PROVIDER_API_URL','KYC_PROVIDER_API_TOKEN','KYC_WEBHOOK_SECRET','RESEND_API_KEY'])if(!env.includes(`${name}=`))failures.push(`Missing env template ${name}`)
++for(const name of ['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY','HEALTHCHECK_SECRET','CRON_SECRET','EMAIL_WORKER_SECRET','ORDER_WORKER_SECRET','PAYMENT_WORKER_SECRET','LEGAL_ACCEPTANCE_SALT','PAYMENT_VERIFICATION_API_URL','PAYMENT_VERIFICATION_API_TOKEN','KYC_PROVIDER_API_URL','KYC_PROVIDER_API_TOKEN','KYC_WEBHOOK_SECRET','RESEND_API_KEY'])if(!env.includes(`${name}=`))failures.push(`Missing env template ${name}`)
+ for(const file of ['apps/web/app/api/admin/operations/route.ts','apps/web/app/api/trading/route.ts']){
+  const source=await readFile(file,'utf8')
+  if(source.includes('SUPABASE_SERVICE_ROLE')||source.includes('service_role'))failures.push(`Service role reference in web route ${file}`)
+-- 
+2.51.1
+

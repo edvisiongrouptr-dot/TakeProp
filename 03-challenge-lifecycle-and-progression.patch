@@ -1,0 +1,135 @@
+From c03cada6c4acf54075484614fbcf1d655ad48e18 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Mon, 17 Aug 2026 12:42:16 +0200
+Subject: [PATCH] Harden challenge lifecycle and stage progression
+
+---
+ apps/web/app/dashboard/auth-dashboard.css     |  1 +
+ apps/web/app/dashboard/page.tsx               | 11 +--
+ ...260817210000_challenge_lifecycle_audit.sql | 76 +++++++++++++++++++
+ 3 files changed, 83 insertions(+), 5 deletions(-)
+ create mode 100644 supabase/migrations/20260817210000_challenge_lifecycle_audit.sql
+
+diff --git a/apps/web/app/dashboard/auth-dashboard.css b/apps/web/app/dashboard/auth-dashboard.css
+index e563978..c53016c 100644
+--- a/apps/web/app/dashboard/auth-dashboard.css
++++ b/apps/web/app/dashboard/auth-dashboard.css
+@@ -1 +1,2 @@
+ .headActions{display:flex;gap:8px}.dash>section>header .logout{color:#e4817c;cursor:pointer}.emptyState{max-width:720px;margin:100px auto;background:radial-gradient(circle at 50% 100%,#43e28a1c,transparent 55%),var(--panel);border:1px solid var(--line);padding:70px;text-align:center}.emptyState>span{color:#72ba92;font-size:9px;letter-spacing:2px}.emptyState h2{font-size:38px;letter-spacing:-2px;margin:16px 0}.emptyState p{color:#7b8a85;line-height:1.7}.emptyState .btn{margin:20px 0}.emptyState>small{display:block;color:#53645d;font-size:8px}.accountInfo{display:grid}.accountInfo span{display:flex;justify-content:space-between;padding:17px 0;border-bottom:1px solid var(--line);color:#697873;font-size:10px}.accountInfo b{color:#dce5e1}@media(max-width:800px){.emptyState{margin:50px auto;padding:45px 22px}.emptyState h2{font-size:30px}.headActions>button:first-child{display:none}}
++.stageBanner{display:flex;justify-content:space-between;gap:20px;border:1px solid var(--line);background:#0a1517;padding:16px 20px;margin:-12px 0 18px}.stageBanner b{color:var(--green);font-size:10px;letter-spacing:.12em}.stageBanner span{color:#778983;font-size:10px;text-align:right}@media(max-width:800px){.stageBanner{flex-direction:column}.stageBanner span{text-align:left}}
+diff --git a/apps/web/app/dashboard/page.tsx b/apps/web/app/dashboard/page.tsx
+index 07cd78c..d22e610 100644
+--- a/apps/web/app/dashboard/page.tsx
++++ b/apps/web/app/dashboard/page.tsx
+@@ -4,20 +4,21 @@ import { getAuthenticatedUser, getOwnData } from '../../lib/supabase-rest'
+ import LogoutButton from './logout-button'
+ 
+ type Profile={full_name:string|null;kyc_status:string}
+-type Plan={name:string;profit_target_pct:number;daily_loss_limit_pct:number;max_loss_limit_pct:number}
+-type Account={display_account_id:string|null;status:string;phase:string;starting_balance:number;balance:number;equity:number;daily_pnl:number;total_pnl:number;challenge_plans:Plan|null}
++type Plan={name:string;profit_target_pct:number;daily_loss_limit_pct:number;max_loss_limit_pct:number;min_trading_days:number}
++type Account={id:string;display_account_id:string|null;status:string;phase:string;starting_balance:number;balance:number;equity:number;daily_pnl:number;total_pnl:number;trading_days:number;evaluation_step:number;evaluation_steps:number;evaluation_target_pct:number|null;challenge_plans:Plan|null}
+ type Order={id:string;status:string;amount:number;currency:string;created_at:string;challenge_plans:{name:string;account_size:number}|null}
+ const usd=(value:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD'}).format(value)
+ 
+ export default async function Dashboard(){
+  const auth=await getAuthenticatedUser(); if(!auth) redirect('/auth')
+  const profiles=await getOwnData<Profile[]>(`profiles?select=full_name,kyc_status&id=eq.${auth.user.id}&limit=1`,auth.accessToken)
+- const accounts=await getOwnData<Account[]>(`trading_accounts?select=display_account_id,status,phase,starting_balance,balance,equity,daily_pnl,total_pnl,challenge_plans(name,profit_target_pct,daily_loss_limit_pct,max_loss_limit_pct)&user_id=eq.${auth.user.id}&order=created_at.desc&limit=1`,auth.accessToken)
++ const accounts=await getOwnData<Account[]>(`trading_accounts?select=id,display_account_id,status,phase,starting_balance,balance,equity,daily_pnl,total_pnl,trading_days,evaluation_step,evaluation_steps,evaluation_target_pct,challenge_plans(name,profit_target_pct,daily_loss_limit_pct,max_loss_limit_pct,min_trading_days)&user_id=eq.${auth.user.id}&order=created_at.desc&limit=1`,auth.accessToken)
+  const orders=accounts[0]?[]:await getOwnData<Order[]>(`orders?select=id,status,amount,currency,created_at,challenge_plans(name,account_size)&user_id=eq.${auth.user.id}&order=created_at.desc&limit=1`,auth.accessToken)
+  const profile=profiles[0],account=accounts[0],order=orders[0],name=profile?.full_name||auth.user.user_metadata?.full_name||auth.user.email?.split('@')[0]||'Trader'
+  if(!account&&order)return <main className="dash"><Aside/><section><header><div><small>TRADER DASHBOARD</small><h1>Welcome, {name}.</h1></div><LogoutButton/></header><div className="emptyState"><span>PAYMENT REVIEW · {order.status.toUpperCase()}</span><h2>Your payment was submitted.</h2><p>We received your {order.amount} {order.currency} payment notification for {order.challenge_plans?.name||'your challenge'}. Your blockchain transaction is awaiting manual verification.</p><Link className="btn" href="/#plans">View challenge rules →</Link><small>ORDER · {order.id.slice(0,8).toUpperCase()} · KYC {(profile?.kyc_status||'not_started').replace('_',' ').toUpperCase()}</small></div></section></main>
+  if(!account)return <main className="dash"><Aside/><section><header><div><small>TRADER DASHBOARD</small><h1>Welcome, {name}.</h1></div><LogoutButton/></header><div className="emptyState"><span>YOUR ACCOUNT IS READY</span><h2>Choose your first challenge.</h2><p>Your secure TakeProp profile is active. Select a package to create your first simulated trading account.</p><Link className="btn" href="/#plans">View challenge plans →</Link><small>KYC STATUS · {(profile?.kyc_status||'not_started').replace('_',' ').toUpperCase()}</small></div></section></main>
+- const plan=account.challenge_plans,target=account.starting_balance*Number(plan?.profit_target_pct||0)/100,progress=target?Math.max(0,Math.min(100,account.total_pnl/target*100)):0,dailyFloor=account.starting_balance*(1-Number(plan?.daily_loss_limit_pct||0)/100),maxFloor=account.starting_balance*(1-Number(plan?.max_loss_limit_pct||0)/100)
+- return <main className="dash"><Aside/><section><header><div><small>TRADER DASHBOARD</small><h1>Welcome back, {name}.</h1></div><div className="headActions"><button>{account.display_account_id||'TAKEPROP ACCOUNT'}</button><LogoutButton/></div></header><div className="dashCards"><Card l="Balance" v={usd(account.balance)}/><Card l="Equity" v={usd(account.equity)} g/><Card l="Today’s P&L" v={usd(account.daily_pnl)} g={account.daily_pnl>=0}/><Card l="Account status" v={account.status.toUpperCase()} g={account.status==='active'}/></div><div className="dashGrid"><article><header><b>Challenge progress</b><small>{plan?.name||account.phase.toUpperCase()}</small></header><div className="bigProgress"><b>{usd(account.total_pnl)}</b><span> of {usd(target)} target</span><i><b style={{width:`${progress}%`}}/></i><strong>{progress.toFixed(1)}% complete</strong></div><div className="riskRows"><div><span>Daily loss floor</span><b>{usd(dailyFloor)}</b><small>{plan?.daily_loss_limit_pct||0}% daily limit</small></div><div><span>Static loss floor</span><b>{usd(maxFloor)}</b><small>{plan?.max_loss_limit_pct||0}% static limit</small></div></div></article><article><header><b>Account</b><small>SIMULATED</small></header><div className="accountInfo"><span>Starting balance<b>{usd(account.starting_balance)}</b></span><span>Phase<b>{account.phase.toUpperCase()}</b></span><span>KYC status<b>{(profile?.kyc_status||'not_started').replace('_',' ').toUpperCase()}</b></span></div><Link className="btn" href="/terminal">Open terminal →</Link></article></div><div className="disclaimer">All trading activity shown is simulated. Mark price is used for unrealized P&amp;L and risk.</div></section></main>}
++ const plan=account.challenge_plans,targetPct=account.phase==='funded'?0:Number(account.evaluation_target_pct??plan?.profit_target_pct??0),target=account.starting_balance*targetPct/100,progress=target?Math.max(0,Math.min(100,account.total_pnl/target*100)):100,dailyFloor=account.starting_balance*(1-Number(plan?.daily_loss_limit_pct||0)/100),maxFloor=account.starting_balance*(1-Number(plan?.max_loss_limit_pct||0)/100),daysRequired=Number(plan?.min_trading_days||0)
++ return <main className="dash"><Aside/><section><header><div><small>TRADER DASHBOARD</small><h1>Welcome back, {name}.</h1></div><div className="headActions"><button>{account.display_account_id||'TAKEPROP ACCOUNT'}</button><LogoutButton/></div></header><div className="dashCards"><Card l="Balance" v={usd(account.balance)}/><Card l="Equity" v={usd(account.equity)} g/><Card l="Today’s P&L" v={usd(account.daily_pnl)} g={account.daily_pnl>=0}/><Card l="Account status" v={account.status.toUpperCase()} g={account.status==='active'}/></div><div className="stageBanner"><b>{account.phase==='funded'?'FUNDED SIMULATED ACCOUNT':`EVALUATION STEP ${account.evaluation_step} OF ${account.evaluation_steps}`}</b><span>{account.status==='passed'?'Completed — the next account is ready':account.status==='breached'?'Failed — a loss limit was breached':account.phase==='funded'?'Eligible profit is subject to payout and KYC rules':'Meet both the profit target and minimum trading-day rule'}</span></div><div className="dashGrid"><article><header><b>{account.phase==='funded'?'Performance':'Challenge progress'}</b><small>{plan?.name||account.phase.toUpperCase()}</small></header><div className="bigProgress"><b>{usd(account.total_pnl)}</b>{account.phase!=='funded'&&<span> of {usd(target)} target ({targetPct}%)</span>}<i><b style={{width:`${progress}%`}}/></i><strong>{account.phase==='funded'?'Funded performance':`${progress.toFixed(1)}% complete`}</strong></div><div className="riskRows"><div><span>Trading days</span><b>{account.trading_days} / {daysRequired}</b><small>Completed / required</small></div><div><span>Static loss floor</span><b>{usd(maxFloor)}</b><small>{plan?.max_loss_limit_pct||0}% static limit</small></div></div></article><article><header><b>Account</b><small>SIMULATED</small></header><div className="accountInfo"><span>Starting balance<b>{usd(account.starting_balance)}</b></span><span>Phase<b>{account.phase.toUpperCase()}</b></span><span>Daily loss floor<b>{usd(dailyFloor)}</b></span><span>KYC status<b>{(profile?.kyc_status||'not_started').replace('_',' ').toUpperCase()}</b></span></div>{account.status==='active'?<Link className="btn" href="/terminal">Open terminal →</Link>:<Link className="btn" href="/support">Contact support →</Link>}</article></div><div className="disclaimer">All trading activity shown is simulated. Mark price is used for unrealized P&amp;L and risk.</div></section></main>
++}
+ function Aside(){return <aside><Link className="brand" href="/"><b>TP</b><strong>TakeProp</strong></Link><nav><a className="active">Overview</a><Link href="/terminal">Trade</Link><Link href="/terminal">Orders &amp; positions</Link><Link href="/payouts">Payouts</Link><Link href="/support">Support</Link></nav><small>SIMULATED ENVIRONMENT</small></aside>}
+ function Card({l,v,g}:{l:string,v:string,g?:boolean}){return <article><small>{l}</small><b className={g?'green':''}>{v}</b></article>}
+diff --git a/supabase/migrations/20260817210000_challenge_lifecycle_audit.sql b/supabase/migrations/20260817210000_challenge_lifecycle_audit.sql
+new file mode 100644
+index 0000000..5864dd9
+--- /dev/null
++++ b/supabase/migrations/20260817210000_challenge_lifecycle_audit.sql
+@@ -0,0 +1,76 @@
++-- Make evaluation lifecycle deterministic for both existing and future accounts.
++create table if not exists public.account_stage_events (
++ id uuid primary key default gen_random_uuid(),
++ account_id uuid not null references public.trading_accounts(id) on delete cascade,
++ user_id uuid not null references auth.users(id) on delete cascade,
++ event_type text not null check(event_type in ('created','started','passed','breached','funded','suspended','closed')),
++ from_status text,
++ to_status text,
++ evaluation_step integer not null,
++ evaluation_steps integer not null,
++ balance numeric(28,8),
++ equity numeric(28,8),
++ details jsonb not null default '{}'::jsonb,
++ created_at timestamptz not null default now()
++);
++create index if not exists account_stage_events_account_idx on public.account_stage_events(account_id,created_at desc);
++alter table public.account_stage_events enable row level security;
++drop policy if exists "Users read own stage events" on public.account_stage_events;
++create policy "Users read own stage events" on public.account_stage_events for select to authenticated using((select auth.uid())=user_id);
++revoke all on public.account_stage_events from anon;
++revoke insert,update,delete on public.account_stage_events from authenticated;
++grant select on public.account_stage_events to authenticated;
++
++create or replace function public.internal_initialize_evaluation_account()
++returns trigger language plpgsql security definer set search_path=''
++as $function$
++declare v_plan public.challenge_plans%rowtype;
++begin
++ select * into v_plan from public.challenge_plans where id=new.plan_id;
++ if not found then raise exception 'Challenge plan not found'; end if;
++ if new.phase='challenge' then
++  new.evaluation_steps:=case when coalesce(v_plan.rules->>'challenge_type','')='two_step' then 2 else 1 end;
++  new.evaluation_step:=greatest(1,coalesce(new.evaluation_step,1));
++  new.evaluation_target_pct:=coalesce(new.evaluation_target_pct,case when new.evaluation_step=2 then coalesce((v_plan.rules->>'phase_2_profit_target_pct')::numeric,v_plan.profit_target_pct) else v_plan.profit_target_pct end);
++ elsif new.phase='funded' then
++  new.evaluation_steps:=case when coalesce(v_plan.rules->>'challenge_type','')='two_step' then 2 else 1 end;
++  new.evaluation_target_pct:=null;
++ end if;
++ return new;
++end;$function$;
++drop trigger if exists initialize_evaluation_account on public.trading_accounts;
++create trigger initialize_evaluation_account before insert on public.trading_accounts
++for each row execute function public.internal_initialize_evaluation_account();
++
++update public.trading_accounts a set
++ evaluation_steps=case when coalesce(p.rules->>'challenge_type','')='two_step' then 2 else 1 end,
++ evaluation_target_pct=case when a.phase='funded' then null when a.evaluation_step=2 then coalesce((p.rules->>'phase_2_profit_target_pct')::numeric,p.profit_target_pct) else p.profit_target_pct end
++from public.challenge_plans p where p.id=a.plan_id;
++
++create or replace function public.internal_record_account_stage_event()
++returns trigger language plpgsql security definer set search_path=''
++as $function$
++declare v_type text;
++begin
++ if tg_op='INSERT' then
++  v_type:=case when new.phase='funded' then 'funded' else 'created' end;
++ elsif new.status is not distinct from old.status and new.phase is not distinct from old.phase then return new;
++ else
++  v_type:=case when new.status in ('passed','breached','suspended','closed') then new.status when new.phase='funded' then 'funded' else 'started' end;
++ end if;
++ insert into public.account_stage_events(account_id,user_id,event_type,from_status,to_status,evaluation_step,evaluation_steps,balance,equity,details)
++ values(new.id,new.user_id,v_type,case when tg_op='UPDATE' then old.status else null end,new.status,new.evaluation_step,new.evaluation_steps,new.balance,new.equity,
++ jsonb_build_object('phase',new.phase,'target_pct',new.evaluation_target_pct,'source_account_id',new.source_account_id));
++ return new;
++end;$function$;
++drop trigger if exists record_account_stage_event on public.trading_accounts;
++create trigger record_account_stage_event after insert or update of status,phase on public.trading_accounts
++for each row execute function public.internal_record_account_stage_event();
++
++insert into public.account_stage_events(account_id,user_id,event_type,to_status,evaluation_step,evaluation_steps,balance,equity,details,created_at)
++select a.id,a.user_id,case when a.phase='funded' then 'funded' when a.status='passed' then 'passed' when a.status='breached' then 'breached' else 'created' end,
++ a.status,a.evaluation_step,a.evaluation_steps,a.balance,a.equity,jsonb_build_object('phase',a.phase,'target_pct',a.evaluation_target_pct,'backfilled',true),coalesce(a.created_at,now())
++from public.trading_accounts a where not exists(select 1 from public.account_stage_events e where e.account_id=a.id);
++
++revoke all on function public.internal_initialize_evaluation_account() from public,anon,authenticated;
++revoke all on function public.internal_record_account_stage_event() from public,anon,authenticated;
+-- 
+2.51.1
+

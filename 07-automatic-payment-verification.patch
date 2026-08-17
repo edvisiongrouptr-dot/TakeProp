@@ -1,0 +1,211 @@
+From 544709695010b555a59b1a9f7301bbb809eae431 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Mon, 17 Aug 2026 12:58:36 +0200
+Subject: [PATCH] Add automatic on-chain payment verification pipeline
+
+---
+ .env.example                                  |  3 ++
+ apps/web/app/api/cron/payments/route.ts       | 14 +++++
+ apps/web/app/api/orders/usdt/route.ts         |  6 ++-
+ apps/web/vercel.json                          |  3 +-
+ scripts/verify-release.mjs                    |  4 +-
+ .../functions/verify-usdt-payments/index.ts   | 36 +++++++++++++
+ ...8010000_automatic_payment_verification.sql | 52 +++++++++++++++++++
+ 7 files changed, 113 insertions(+), 5 deletions(-)
+ create mode 100644 apps/web/app/api/cron/payments/route.ts
+ create mode 100644 supabase/functions/verify-usdt-payments/index.ts
+ create mode 100644 supabase/migrations/20260818010000_automatic_payment_verification.sql
+
+diff --git a/.env.example b/.env.example
+index 3730fde..c757b99 100644
+--- a/.env.example
++++ b/.env.example
+@@ -19,6 +19,9 @@ HEALTHCHECK_SECRET=replace_with_32_or_more_random_characters
+ CRON_SECRET=replace_with_32_or_more_random_characters
+ EMAIL_WORKER_SECRET=replace_with_32_or_more_random_characters
+ ORDER_WORKER_SECRET=replace_with_32_or_more_random_characters
++PAYMENT_WORKER_SECRET=replace_with_32_or_more_random_characters
++PAYMENT_VERIFICATION_API_URL=https://your-verification-provider.example/v1/verify-usdt
++PAYMENT_VERIFICATION_API_TOKEN=replace_me
+ RESEND_API_KEY=re_replace_me
+ EMAIL_FROM=TakeProp <operations@example.com>
+ ALERT_WEBHOOK_URL=
+diff --git a/apps/web/app/api/cron/payments/route.ts b/apps/web/app/api/cron/payments/route.ts
+new file mode 100644
+index 0000000..46ed91b
+--- /dev/null
++++ b/apps/web/app/api/cron/payments/route.ts
+@@ -0,0 +1,14 @@
++import {NextRequest,NextResponse} from 'next/server'
++export const dynamic='force-dynamic'
++export async function GET(request:NextRequest){
++ if(!process.env.CRON_SECRET||request.headers.get('authorization')!==`Bearer ${process.env.CRON_SECRET}`)return NextResponse.json({error:'Unauthorized'},{status:401})
++ const url=process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/,'')
++ const key=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
++ const secret=process.env.PAYMENT_WORKER_SECRET
++ if(!url||!key||!secret)return NextResponse.json({error:'Payment worker is not configured.'},{status:503})
++ try{
++  const response=await fetch(`${url}/functions/v1/verify-usdt-payments`,{method:'POST',headers:{apikey:key,Authorization:`Bearer ${secret}`},cache:'no-store',signal:AbortSignal.timeout(50_000)})
++  const result=await response.json().catch(()=>({error:'Invalid worker response'}))
++  return NextResponse.json(result,{status:response.status})
++ }catch{return NextResponse.json({error:'Payment worker unavailable.'},{status:503})}
++}
+diff --git a/apps/web/app/api/orders/usdt/route.ts b/apps/web/app/api/orders/usdt/route.ts
+index b3ea490..23b0666 100644
+--- a/apps/web/app/api/orders/usdt/route.ts
++++ b/apps/web/app/api/orders/usdt/route.ts
+@@ -17,7 +17,9 @@ export async function POST(request: Request) {
+     if (typeof planId !== 'string') return NextResponse.json({ error: 'Choose a valid challenge plan.' }, { status: 400 })
+     const selected = typeof network === 'string' ? networks[network as keyof typeof networks] : undefined
+     if (!selected) return NextResponse.json({ error: 'Choose a supported USDT network.' }, { status: 400 })
+-    if (typeof txHash !== 'string' || !/^[A-Za-z0-9+/_=-]{20,100}$/.test(txHash.trim())) return NextResponse.json({ error: 'Enter a valid transaction hash for the selected network.' }, { status: 400 })
++    const normalized=typeof txHash==='string'?txHash.trim():''
++    const validHash=network==='bep20'||network==='erc20'?/^0x[0-9a-fA-F]{64}$/.test(normalized):network==='trc20'?/^[0-9a-fA-F]{64}$/.test(normalized):/^[A-Za-z0-9_-]{43,44}$/.test(normalized)
++    if (!validHash) return NextResponse.json({ error: 'Enter a valid transaction hash for the selected network.' }, { status: 400 })
+     const plans = await getOwnData<Plan[]>(`challenge_plans?select=id,slug,name,account_size,price,currency,version,rules&id=eq.${encodeURIComponent(planId)}&is_active=eq.true&limit=1`, auth.accessToken)
+     const plan = plans[0]
+     if (!plan) return NextResponse.json({ error: 'This challenge plan is unavailable.' }, { status: 404 })
+@@ -29,7 +31,7 @@ export async function POST(request: Request) {
+       status: 'pending',
+       payment_provider: selected.provider,
+       provider_checkout_id: selected.wallet,
+-      provider_payment_id: txHash.trim().toLowerCase(),
++      provider_payment_id: normalized,
+       plan_version: plan.version,
+       plan_snapshot: { slug: plan.slug, name: plan.name, account_size: plan.account_size, price: plan.price, currency: plan.currency, rules: plan.rules }
+     })
+diff --git a/apps/web/vercel.json b/apps/web/vercel.json
+index 7a95b6d..99ab554 100644
+--- a/apps/web/vercel.json
++++ b/apps/web/vercel.json
+@@ -2,6 +2,7 @@
+   "$schema": "https://openapi.vercel.sh/vercel.json",
+   "crons": [
+     { "path": "/api/cron/email", "schedule": "*/5 * * * *" },
+-    { "path": "/api/cron/orders", "schedule": "* * * * *" }
++    { "path": "/api/cron/orders", "schedule": "* * * * *" },
++    { "path": "/api/cron/payments", "schedule": "*/2 * * * *" }
+   ]
+ }
+diff --git a/scripts/verify-release.mjs b/scripts/verify-release.mjs
+index fa9e1f0..1225cc5 100644
+--- a/scripts/verify-release.mjs
++++ b/scripts/verify-release.mjs
+@@ -5,12 +5,12 @@ const required=[
+  'apps/web/app/terminal/page.tsx','apps/web/app/admin/page.tsx','apps/web/app/support/page.tsx',
+  'apps/web/app/terms/page.tsx','apps/web/app/privacy/page.tsx','apps/web/app/risk-disclosure/page.tsx',
+  'apps/web/middleware.ts','apps/web/vercel.json','supabase/functions/sim-trading/index.ts',
+- 'supabase/functions/send-email-outbox/index.ts','supabase/functions/process-active-orders/index.ts'
++ 'supabase/functions/send-email-outbox/index.ts','supabase/functions/process-active-orders/index.ts','supabase/functions/verify-usdt-payments/index.ts'
+ ]
+ const failures=[]
+ for(const file of required)try{await access(file)}catch{failures.push(`Missing ${file}`)}
+ const env=await readFile('.env.example','utf8')
+-for(const name of ['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY','HEALTHCHECK_SECRET','CRON_SECRET','EMAIL_WORKER_SECRET','ORDER_WORKER_SECRET','RESEND_API_KEY'])if(!env.includes(`${name}=`))failures.push(`Missing env template ${name}`)
++for(const name of ['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY','HEALTHCHECK_SECRET','CRON_SECRET','EMAIL_WORKER_SECRET','ORDER_WORKER_SECRET','PAYMENT_WORKER_SECRET','PAYMENT_VERIFICATION_API_URL','PAYMENT_VERIFICATION_API_TOKEN','RESEND_API_KEY'])if(!env.includes(`${name}=`))failures.push(`Missing env template ${name}`)
+ for(const file of ['apps/web/app/api/admin/operations/route.ts','apps/web/app/api/trading/route.ts']){
+  const source=await readFile(file,'utf8')
+  if(source.includes('SUPABASE_SERVICE_ROLE')||source.includes('service_role'))failures.push(`Service role reference in web route ${file}`)
+diff --git a/supabase/functions/verify-usdt-payments/index.ts b/supabase/functions/verify-usdt-payments/index.ts
+new file mode 100644
+index 0000000..bb67fc2
+--- /dev/null
++++ b/supabase/functions/verify-usdt-payments/index.ts
+@@ -0,0 +1,36 @@
++const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}})
++function secret(name:string,fallback:string){const direct=Deno.env.get(name);if(direct)return direct;const raw=Deno.env.get(fallback)||'';try{const parsed=JSON.parse(raw);return String(parsed.default||Object.values(parsed)[0]||'')}catch{return raw}}
++const minimums:Record<string,number>={usdt_bep20:12,usdt_erc20:20,usdt_trc20:20,usdt_ton:10}
++Deno.serve(async request=>{
++ if(request.method!=='POST')return json({error:'Method not allowed'},405)
++ const workerSecret=Deno.env.get('PAYMENT_WORKER_SECRET')||''
++ if(!workerSecret||request.headers.get('authorization')!==`Bearer ${workerSecret}`)return json({error:'Unauthorized'},401)
++ const url=Deno.env.get('SUPABASE_URL')||'',serviceKey=secret('SUPABASE_SERVICE_ROLE_KEY','SUPABASE_SECRET_KEYS')
++ const verifierUrl=Deno.env.get('PAYMENT_VERIFICATION_API_URL')||'',verifierToken=Deno.env.get('PAYMENT_VERIFICATION_API_TOKEN')||''
++ if(!url||!serviceKey||!verifierUrl||!verifierToken)return json({error:'Payment verification is not configured'},503)
++ const headers={apikey:serviceKey,authorization:`Bearer ${serviceKey}`,'content-type':'application/json'}
++ try{
++  const queueResponse=await fetch(`${url}/rest/v1/orders?status=eq.pending&verification_status=in.(pending,failed)&select=id,amount,currency,payment_provider,provider_checkout_id,provider_payment_id,created_at&order=created_at.asc&limit=25`,{headers})
++  if(!queueResponse.ok)throw new Error('Unable to load payment queue')
++  const queue=await queueResponse.json(),results=[]
++  for(const order of queue){
++   try{
++    await fetch(`${url}/rest/v1/orders?id=eq.${order.id}`,{method:'PATCH',headers,body:JSON.stringify({verification_status:'verifying',verification_error:null})})
++    const verifyResponse=await fetch(verifierUrl,{method:'POST',headers:{authorization:`Bearer ${verifierToken}`,'content-type':'application/json'},body:JSON.stringify({network:String(order.payment_provider).replace('usdt_',''),asset:'USDT',transactionHash:order.provider_payment_id,expectedRecipient:order.provider_checkout_id,expectedAmount:Number(order.amount),minimumConfirmations:minimums[order.payment_provider]||20}),signal:AbortSignal.timeout(20_000)})
++    const evidence=await verifyResponse.json().catch(()=>({verified:false,reason:'Invalid verification response'}))
++    const confirmations=Number(evidence.confirmations||0),amount=Number(evidence.amount||0),recipient=String(evidence.recipient||'')
++    const verified=verifyResponse.ok&&evidence.verified===true&&confirmations>=(minimums[order.payment_provider]||20)&&amount>=Number(order.amount)&&recipient.toLowerCase()===String(order.provider_checkout_id).toLowerCase()
++    if(verified){
++     const finish=await fetch(`${url}/rest/v1/rpc/internal_finalize_verified_usdt_order`,{method:'POST',headers,body:JSON.stringify({p_order_id:order.id,p_confirmations:confirmations,p_amount:amount,p_recipient:recipient,p_evidence:evidence})})
++     if(!finish.ok)throw new Error((await finish.json().catch(()=>({}))).message||'Account creation failed')
++     results.push({id:order.id,status:'verified'})
++    }else{
++     const age=Date.now()-new Date(order.created_at).getTime(),manual=age>24*60*60*1000
++     await fetch(`${url}/rest/v1/rpc/internal_record_payment_verification_failure`,{method:'POST',headers,body:JSON.stringify({p_order_id:order.id,p_error:String(evidence.reason||'Transaction not yet confirmed'),p_manual:manual})})
++     results.push({id:order.id,status:manual?'manual_review':'pending'})
++    }
++   }catch(error){await fetch(`${url}/rest/v1/rpc/internal_record_payment_verification_failure`,{method:'POST',headers,body:JSON.stringify({p_order_id:order.id,p_error:error instanceof Error?error.message:'Verification failed',p_manual:false})});results.push({id:order.id,status:'retry'})}
++  }
++  return json({ok:true,processed:results.length,results})
++ }catch(error){return json({error:error instanceof Error?error.message:'Verification worker failed'},503)}
++})
+diff --git a/supabase/migrations/20260818010000_automatic_payment_verification.sql b/supabase/migrations/20260818010000_automatic_payment_verification.sql
+new file mode 100644
+index 0000000..0d89682
+--- /dev/null
++++ b/supabase/migrations/20260818010000_automatic_payment_verification.sql
+@@ -0,0 +1,52 @@
++begin;
++
++alter table public.orders
++ add column if not exists verification_status text not null default 'pending' check(verification_status in ('pending','verifying','verified','failed','manual_review')),
++ add column if not exists verification_confirmations integer not null default 0,
++ add column if not exists verification_amount numeric(28,8),
++ add column if not exists verification_recipient text,
++ add column if not exists verification_error text,
++ add column if not exists verification_evidence jsonb not null default '{}'::jsonb,
++ add column if not exists verified_at timestamptz;
++
++create index if not exists orders_verification_queue_idx on public.orders(status,verification_status,created_at)
++ where status='pending';
++
++create or replace function public.internal_finalize_verified_usdt_order(
++ p_order_id uuid,p_confirmations integer,p_amount numeric,p_recipient text,p_evidence jsonb default '{}'::jsonb
++) returns uuid language plpgsql security definer set search_path=public,pg_temp as $$
++declare v_order public.orders%rowtype;v_plan public.challenge_plans%rowtype;v_account_id uuid;
++begin
++ select * into v_order from public.orders where id=p_order_id for update;
++ if not found or v_order.status<>'pending' then raise exception 'Pending order not found';end if;
++ if v_order.payment_provider not in ('usdt_bep20','usdt_erc20','usdt_trc20','usdt_ton') then raise exception 'Unsupported payment provider';end if;
++ if lower(p_recipient)<>lower(v_order.provider_checkout_id) then raise exception 'Recipient mismatch';end if;
++ if p_amount<v_order.amount then raise exception 'Payment amount is insufficient';end if;
++ select * into v_plan from public.challenge_plans where id=v_order.plan_id and is_active=true;
++ if not found then raise exception 'Plan is unavailable';end if;
++ select id into v_account_id from public.trading_accounts where order_id=v_order.id limit 1;
++ if v_account_id is null then
++  insert into public.trading_accounts(user_id,plan_id,order_id,provider,provider_account_id,display_account_id,phase,status,starting_balance,balance,equity,high_water_mark,daily_start_equity,daily_start_balance,total_pnl,daily_pnl,started_at)
++  values(v_order.user_id,v_order.plan_id,v_order.id,'takeprop_simulated','order-'||v_order.id,'TP-'||upper(substr(replace(v_order.id::text,'-',''),1,10)),'challenge','active',v_plan.account_size,v_plan.account_size,v_plan.account_size,v_plan.account_size,v_plan.account_size,v_plan.account_size,0,0,now()) returning id into v_account_id;
++ end if;
++ update public.orders set status='paid',paid_at=now(),verification_status='verified',verification_confirmations=p_confirmations,
++  verification_amount=p_amount,verification_recipient=p_recipient,verification_error=null,verification_evidence=p_evidence,verified_at=now(),review_note='Automatically verified on-chain'
++ where id=p_order_id;
++ insert into public.notifications(user_id,notification_type,title,body,action_url)
++ values(v_order.user_id,'payment_verified','Payment verified','Your USDT payment was verified and your simulated challenge account is ready.','/dashboard');
++ return v_account_id;
++end$$;
++
++create or replace function public.internal_record_payment_verification_failure(p_order_id uuid,p_error text,p_manual boolean default false)
++returns void language plpgsql security definer set search_path=public,pg_temp as $$
++begin
++ update public.orders set verification_status=case when p_manual then 'manual_review' else 'failed' end,verification_error=left(p_error,500)
++ where id=p_order_id and status='pending';
++end$$;
++
++revoke all on function public.internal_finalize_verified_usdt_order(uuid,integer,numeric,text,jsonb) from public,anon,authenticated;
++revoke all on function public.internal_record_payment_verification_failure(uuid,text,boolean) from public,anon,authenticated;
++grant execute on function public.internal_finalize_verified_usdt_order(uuid,integer,numeric,text,jsonb) to service_role;
++grant execute on function public.internal_record_payment_verification_failure(uuid,text,boolean) to service_role;
++
++commit;
+-- 
+2.51.1
+

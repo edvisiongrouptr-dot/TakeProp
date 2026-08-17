@@ -1,0 +1,204 @@
+From b74be185463c0efc77245e9a78183e3a4348e22f Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Mon, 17 Aug 2026 13:00:54 +0200
+Subject: [PATCH] Add provider-ready KYC verification workflow
+
+---
+ .env.example                                  |  3 ++
+ apps/web/app/api/kyc/route.ts                 |  6 +++
+ apps/web/app/kyc/kyc.module.css               |  1 +
+ apps/web/app/kyc/page.tsx                     |  8 +++
+ apps/web/app/kyc/start-button.tsx             |  3 ++
+ apps/web/middleware.ts                        |  2 +-
+ scripts/verify-release.mjs                    |  6 +--
+ supabase/functions/kyc/index.ts               | 26 ++++++++++
+ ...0260818020000_kyc_provider_integration.sql | 51 +++++++++++++++++++
+ 9 files changed, 102 insertions(+), 4 deletions(-)
+ create mode 100644 apps/web/app/api/kyc/route.ts
+ create mode 100644 apps/web/app/kyc/kyc.module.css
+ create mode 100644 apps/web/app/kyc/page.tsx
+ create mode 100644 apps/web/app/kyc/start-button.tsx
+ create mode 100644 supabase/functions/kyc/index.ts
+ create mode 100644 supabase/migrations/20260818020000_kyc_provider_integration.sql
+
+diff --git a/.env.example b/.env.example
+index c757b99..16a29c1 100644
+--- a/.env.example
++++ b/.env.example
+@@ -22,6 +22,9 @@ ORDER_WORKER_SECRET=replace_with_32_or_more_random_characters
+ PAYMENT_WORKER_SECRET=replace_with_32_or_more_random_characters
+ PAYMENT_VERIFICATION_API_URL=https://your-verification-provider.example/v1/verify-usdt
+ PAYMENT_VERIFICATION_API_TOKEN=replace_me
++KYC_PROVIDER_API_URL=https://your-kyc-provider.example/v1
++KYC_PROVIDER_API_TOKEN=replace_me
++KYC_WEBHOOK_SECRET=replace_with_32_or_more_random_characters
+ RESEND_API_KEY=re_replace_me
+ EMAIL_FROM=TakeProp <operations@example.com>
+ ALERT_WEBHOOK_URL=
+diff --git a/apps/web/app/api/kyc/route.ts b/apps/web/app/api/kyc/route.ts
+new file mode 100644
+index 0000000..0f7c2a9
+--- /dev/null
++++ b/apps/web/app/api/kyc/route.ts
+@@ -0,0 +1,6 @@
++import {NextResponse} from 'next/server'
++import {getAuthenticatedUser,supabaseConfig} from '../../../lib/supabase-rest'
++export async function POST(request:Request){
++ const auth=await getAuthenticatedUser();if(!auth)return NextResponse.json({error:'Sign in required.'},{status:401})
++ try{const {url,key}=supabaseConfig(),response=await fetch(`${url}/functions/v1/kyc`,{method:'POST',headers:{apikey:key,Authorization:`Bearer ${auth.accessToken}`,Origin:new URL(request.url).origin},cache:'no-store'}),result=await response.json().catch(()=>({error:'Invalid KYC response'}));return NextResponse.json(result,{status:response.status})}catch{return NextResponse.json({error:'Identity verification is unavailable.'},{status:503})}
++}
+diff --git a/apps/web/app/kyc/kyc.module.css b/apps/web/app/kyc/kyc.module.css
+new file mode 100644
+index 0000000..4187e8b
+--- /dev/null
++++ b/apps/web/app/kyc/kyc.module.css
+@@ -0,0 +1 @@
++.page{min-height:100vh;background:radial-gradient(circle at 20% 10%,#0e2a20,#050b0e 45%);display:grid;place-items:center;padding:24px;color:#f3f7f5}.card{width:min(680px,100%);background:#0b1418;border:1px solid #264037;padding:clamp(28px,6vw,64px)}.card small{color:#57d99b;letter-spacing:.18em}.card h1{font-size:clamp(40px,8vw,68px);letter-spacing:-.05em;margin:18px 0}.card p{color:#91a19c;line-height:1.7}.card p a{color:#63dda4}.status{border:1px solid #29483b;background:#0d2018;padding:18px;margin:28px 0;color:#91a19c}.status b{color:#57df9c}.card button{border:0;cursor:pointer}.card button:disabled{opacity:.6;cursor:wait}
+diff --git a/apps/web/app/kyc/page.tsx b/apps/web/app/kyc/page.tsx
+new file mode 100644
+index 0000000..0245c68
+--- /dev/null
++++ b/apps/web/app/kyc/page.tsx
+@@ -0,0 +1,8 @@
++import {redirect} from 'next/navigation'
++import Link from 'next/link'
++import {getAuthenticatedUser,getOwnData} from '../../lib/supabase-rest'
++import StartButton from './start-button'
++import styles from './kyc.module.css'
++type Profile={kyc_status:string};type Session={status:string;verification_url:string|null;updated_at:string}
++export const dynamic='force-dynamic'
++export default async function KycPage(){const auth=await getAuthenticatedUser();if(!auth)redirect('/auth');const [profiles,sessions]=await Promise.all([getOwnData<Profile[]>(`profiles?select=kyc_status&id=eq.${auth.user.id}&limit=1`,auth.accessToken),getOwnData<Session[]>('kyc_sessions?select=status,verification_url,updated_at&order=created_at.desc&limit=1',auth.accessToken)]);const status=profiles[0]?.kyc_status||'not_started',session=sessions[0];return <main className={styles.page}><section className={styles.card}><small>SECURE IDENTITY CHECK</small><h1>Identity verification</h1><p>KYC is required before a performance reward can be paid. Documents are collected by the configured verification provider, not stored in the public website.</p><div className={styles.status}>Current status: <b>{status.replace('_',' ').toUpperCase()}</b></div>{status==='approved'?<Link className="btn" href="/dashboard">Return to dashboard →</Link>:session?.verification_url&&['pending','in_review'].includes(session.status)?<a className="btn" href={session.verification_url}>Continue verification →</a>:<StartButton/>}<p><Link href="/aml-kyc">Read the AML/KYC policy</Link> · <Link href="/support">Contact support</Link></p></section></main>}
+diff --git a/apps/web/app/kyc/start-button.tsx b/apps/web/app/kyc/start-button.tsx
+new file mode 100644
+index 0000000..27c4f45
+--- /dev/null
++++ b/apps/web/app/kyc/start-button.tsx
+@@ -0,0 +1,3 @@
++'use client'
++import {useState} from 'react'
++export default function StartButton(){const [busy,setBusy]=useState(false),[error,setError]=useState('');async function start(){setBusy(true);setError('');const response=await fetch('/api/kyc',{method:'POST'}),result=await response.json().catch(()=>({}));if(!response.ok||!result.url){setBusy(false);setError(result.error||'Unable to start verification');return}location.assign(result.url)}return <><button className="btn" disabled={busy} onClick={start}>{busy?'Opening secure verification…':'Start identity verification →'}</button>{error&&<p>{error}</p>}</>}
+diff --git a/apps/web/middleware.ts b/apps/web/middleware.ts
+index 813b4f1..ff798a0 100644
+--- a/apps/web/middleware.ts
++++ b/apps/web/middleware.ts
+@@ -48,4 +48,4 @@ export async function middleware(request:NextRequest){
+  const response=NextResponse.redirect(new URL('/auth',request.url));response.cookies.delete(accessName);response.cookies.delete(refreshName);return response
+ }
+ 
+-export const config={matcher:['/dashboard/:path*','/terminal/:path*','/payouts/:path*','/admin/:path*','/support/:path*','/notifications/:path*','/api/:path*']}
++export const config={matcher:['/dashboard/:path*','/terminal/:path*','/payouts/:path*','/kyc/:path*','/admin/:path*','/support/:path*','/notifications/:path*','/api/:path*']}
+diff --git a/scripts/verify-release.mjs b/scripts/verify-release.mjs
+index 1225cc5..634d501 100644
+--- a/scripts/verify-release.mjs
++++ b/scripts/verify-release.mjs
+@@ -2,15 +2,15 @@ import {access,readFile} from 'node:fs/promises'
+ 
+ const required=[
+  'apps/web/app/page.tsx','apps/web/app/auth/page.tsx','apps/web/app/dashboard/page.tsx',
+- 'apps/web/app/terminal/page.tsx','apps/web/app/admin/page.tsx','apps/web/app/support/page.tsx',
++ 'apps/web/app/terminal/page.tsx','apps/web/app/admin/page.tsx','apps/web/app/support/page.tsx','apps/web/app/kyc/page.tsx',
+  'apps/web/app/terms/page.tsx','apps/web/app/privacy/page.tsx','apps/web/app/risk-disclosure/page.tsx',
+  'apps/web/middleware.ts','apps/web/vercel.json','supabase/functions/sim-trading/index.ts',
+- 'supabase/functions/send-email-outbox/index.ts','supabase/functions/process-active-orders/index.ts','supabase/functions/verify-usdt-payments/index.ts'
++ 'supabase/functions/send-email-outbox/index.ts','supabase/functions/process-active-orders/index.ts','supabase/functions/verify-usdt-payments/index.ts','supabase/functions/kyc/index.ts'
+ ]
+ const failures=[]
+ for(const file of required)try{await access(file)}catch{failures.push(`Missing ${file}`)}
+ const env=await readFile('.env.example','utf8')
+-for(const name of ['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY','HEALTHCHECK_SECRET','CRON_SECRET','EMAIL_WORKER_SECRET','ORDER_WORKER_SECRET','PAYMENT_WORKER_SECRET','PAYMENT_VERIFICATION_API_URL','PAYMENT_VERIFICATION_API_TOKEN','RESEND_API_KEY'])if(!env.includes(`${name}=`))failures.push(`Missing env template ${name}`)
++for(const name of ['NEXT_PUBLIC_SUPABASE_URL','NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY','HEALTHCHECK_SECRET','CRON_SECRET','EMAIL_WORKER_SECRET','ORDER_WORKER_SECRET','PAYMENT_WORKER_SECRET','PAYMENT_VERIFICATION_API_URL','PAYMENT_VERIFICATION_API_TOKEN','KYC_PROVIDER_API_URL','KYC_PROVIDER_API_TOKEN','KYC_WEBHOOK_SECRET','RESEND_API_KEY'])if(!env.includes(`${name}=`))failures.push(`Missing env template ${name}`)
+ for(const file of ['apps/web/app/api/admin/operations/route.ts','apps/web/app/api/trading/route.ts']){
+  const source=await readFile(file,'utf8')
+  if(source.includes('SUPABASE_SERVICE_ROLE')||source.includes('service_role'))failures.push(`Service role reference in web route ${file}`)
+diff --git a/supabase/functions/kyc/index.ts b/supabase/functions/kyc/index.ts
+new file mode 100644
+index 0000000..2a2efec
+--- /dev/null
++++ b/supabase/functions/kyc/index.ts
+@@ -0,0 +1,26 @@
++const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}})
++function secret(name:string,fallback:string){const direct=Deno.env.get(name);if(direct)return direct;const raw=Deno.env.get(fallback)||'';try{const parsed=JSON.parse(raw);return String(parsed.default||Object.values(parsed)[0]||'')}catch{return raw}}
++const hex=(bytes:ArrayBuffer)=>[...new Uint8Array(bytes)].map(x=>x.toString(16).padStart(2,'0')).join('')
++async function signature(secretValue:string,body:string){const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(secretValue),{name:'HMAC',hash:'SHA-256'},false,['sign']);return hex(await crypto.subtle.sign('HMAC',key,new TextEncoder().encode(body)))}
++Deno.serve(async request=>{
++ const url=Deno.env.get('SUPABASE_URL')||'',anon=secret('SUPABASE_ANON_KEY','SUPABASE_PUBLISHABLE_KEYS'),service=secret('SUPABASE_SERVICE_ROLE_KEY','SUPABASE_SECRET_KEYS')
++ const providerUrl=(Deno.env.get('KYC_PROVIDER_API_URL')||'').replace(/\/$/,''),providerToken=Deno.env.get('KYC_PROVIDER_API_TOKEN')||''
++ if(!url||!anon||!service)return json({error:'KYC service is not configured'},503)
++ if(request.method!=='POST')return json({error:'Method not allowed'},405)
++ if(new URL(request.url).pathname.endsWith('/webhook')){
++  const raw=await request.text(),webhookSecret=Deno.env.get('KYC_WEBHOOK_SECRET')||'',received=request.headers.get('x-takeprop-signature')||''
++  if(!webhookSecret||received!==await signature(webhookSecret,raw))return json({error:'Invalid signature'},401)
++  const event=JSON.parse(raw),headers={apikey:service,authorization:`Bearer ${service}`,'content-type':'application/json'}
++  const response=await fetch(`${url}/rest/v1/rpc/internal_process_kyc_webhook`,{method:'POST',headers,body:JSON.stringify({p_event_id:String(event.id),p_provider:String(event.provider||'configured_provider'),p_reference:String(event.reference),p_status:String(event.status),p_payload:event})})
++  return json(response.ok?{ok:true}:{error:(await response.json().catch(()=>({}))).message||'Webhook failed'},response.ok?200:400)
++ }
++ const authorization=request.headers.get('authorization')||''
++ if(!authorization.startsWith('Bearer ')||!providerUrl||!providerToken)return json({error:'Unauthorized or provider unavailable'},401)
++ const userResponse=await fetch(`${url}/auth/v1/user`,{headers:{apikey:anon,authorization}});if(!userResponse.ok)return json({error:'Unauthorized'},401)
++ const user=await userResponse.json(),origin=request.headers.get('origin')||'https://takeprop.vercel.app'
++ const providerResponse=await fetch(`${providerUrl}/sessions`,{method:'POST',headers:{authorization:`Bearer ${providerToken}`,'content-type':'application/json'},body:JSON.stringify({externalUserId:user.id,email:user.email,successUrl:`${origin}/kyc?status=completed`,cancelUrl:`${origin}/kyc?status=canceled`,webhookUrl:`${url}/functions/v1/kyc/webhook`}),signal:AbortSignal.timeout(20_000)})
++ const provider=await providerResponse.json().catch(()=>({}));if(!providerResponse.ok||!provider.id||!provider.url)return json({error:provider.message||'Unable to start verification'},502)
++ const rpc=await fetch(`${url}/rest/v1/rpc/internal_create_kyc_session`,{method:'POST',headers:{apikey:service,authorization:`Bearer ${service}`,'content-type':'application/json'},body:JSON.stringify({p_user_id:user.id,p_provider:String(provider.provider||'configured_provider'),p_reference:String(provider.id),p_url:String(provider.url),p_payload:provider})})
++ if(!rpc.ok)return json({error:'Unable to save verification session'},500)
++ return json({ok:true,url:provider.url})
++})
+diff --git a/supabase/migrations/20260818020000_kyc_provider_integration.sql b/supabase/migrations/20260818020000_kyc_provider_integration.sql
+new file mode 100644
+index 0000000..37843af
+--- /dev/null
++++ b/supabase/migrations/20260818020000_kyc_provider_integration.sql
+@@ -0,0 +1,51 @@
++begin;
++
++create table if not exists public.kyc_sessions(
++ id uuid primary key default gen_random_uuid(),user_id uuid not null references auth.users(id) on delete cascade,
++ provider text not null,provider_reference text not null unique,status text not null default 'pending' check(status in ('pending','in_review','approved','rejected','expired')),
++ verification_url text,provider_payload jsonb not null default '{}'::jsonb,created_at timestamptz not null default now(),updated_at timestamptz not null default now(),completed_at timestamptz
++);
++create index if not exists kyc_sessions_user_created_idx on public.kyc_sessions(user_id,created_at desc);
++alter table public.kyc_sessions enable row level security;
++drop policy if exists "Users read own KYC sessions" on public.kyc_sessions;
++create policy "Users read own KYC sessions" on public.kyc_sessions for select to authenticated using((select auth.uid())=user_id);
++revoke all on public.kyc_sessions from anon;revoke insert,update,delete on public.kyc_sessions from authenticated;grant select on public.kyc_sessions to authenticated;
++
++create table if not exists public.kyc_webhook_events(
++ id text primary key,provider text not null,payload jsonb not null,received_at timestamptz not null default now(),processed_at timestamptz
++);
++alter table public.kyc_webhook_events enable row level security;
++revoke all on public.kyc_webhook_events from anon,authenticated;
++
++create or replace function public.internal_create_kyc_session(p_user_id uuid,p_provider text,p_reference text,p_url text,p_payload jsonb)
++returns uuid language plpgsql security definer set search_path=public,pg_temp as $$
++declare v_id uuid;
++begin
++ update public.kyc_sessions set status='expired',updated_at=now() where user_id=p_user_id and status in ('pending','in_review');
++ insert into public.kyc_sessions(user_id,provider,provider_reference,verification_url,provider_payload) values(p_user_id,p_provider,p_reference,p_url,coalesce(p_payload,'{}'::jsonb)) returning id into v_id;
++ update public.profiles set kyc_status='pending',updated_at=now() where id=p_user_id;
++ return v_id;
++end$$;
++
++create or replace function public.internal_process_kyc_webhook(p_event_id text,p_provider text,p_reference text,p_status text,p_payload jsonb)
++returns boolean language plpgsql security definer set search_path=public,pg_temp as $$
++declare v_session public.kyc_sessions%rowtype;v_profile_status text;
++begin
++ if p_status not in ('pending','in_review','approved','rejected','expired') then raise exception 'Invalid KYC status';end if;
++ insert into public.kyc_webhook_events(id,provider,payload) values(p_event_id,p_provider,p_payload) on conflict(id) do nothing;
++ if not found then return false;end if;
++ select * into v_session from public.kyc_sessions where provider=p_provider and provider_reference=p_reference for update;
++ if not found then raise exception 'KYC session not found';end if;
++ update public.kyc_sessions set status=p_status,provider_payload=provider_payload||p_payload,updated_at=now(),completed_at=case when p_status in ('approved','rejected','expired') then now() else null end where id=v_session.id;
++ v_profile_status=case when p_status='approved' then 'approved' when p_status='rejected' then 'rejected' when p_status in ('pending','in_review') then 'pending' else 'not_started' end;
++ update public.profiles set kyc_status=v_profile_status,updated_at=now() where id=v_session.user_id;
++ insert into public.notifications(user_id,notification_type,title,body,action_url) values(v_session.user_id,'kyc_'||v_profile_status,'Identity verification updated',case when v_profile_status='approved' then 'Your identity verification is approved.' when v_profile_status='rejected' then 'Your identity verification was not approved. Contact support if you need help.' else 'Your identity verification is being reviewed.' end,'/kyc');
++ update public.kyc_webhook_events set processed_at=now() where id=p_event_id;return true;
++end$$;
++
++revoke all on function public.internal_create_kyc_session(uuid,text,text,text,jsonb) from public,anon,authenticated;
++revoke all on function public.internal_process_kyc_webhook(text,text,text,text,jsonb) from public,anon,authenticated;
++grant execute on function public.internal_create_kyc_session(uuid,text,text,text,jsonb) to service_role;
++grant execute on function public.internal_process_kyc_webhook(text,text,text,text,jsonb) to service_role;
++
++commit;
+-- 
+2.51.1
+

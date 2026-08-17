@@ -1,0 +1,295 @@
+From a966bb82961aa7d6ab7058479221bf2542857252 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Mon, 17 Aug 2026 12:50:45 +0200
+Subject: [PATCH] Add notifications support desk and email delivery queue
+
+---
+ apps/web/app/api/notifications/read/route.ts  |   3 +
+ .../app/api/support/[id]/messages/route.ts    |   3 +
+ apps/web/app/api/support/route.ts             |   3 +
+ .../notifications/notification-actions.tsx    |   3 +
+ .../notifications/notifications.module.css    |   1 +
+ apps/web/app/notifications/page.tsx           |   8 ++
+ apps/web/app/support/[id]/page.tsx            |   9 ++
+ apps/web/app/support/[id]/reply-form.tsx      |   4 +
+ apps/web/app/support/page.tsx                 |   8 +-
+ apps/web/app/support/support-form.tsx         |   3 +
+ apps/web/app/support/support.module.css       |   3 +
+ supabase/functions/send-email-outbox/index.ts |   4 +
+ ...0000_notifications_support_email_queue.sql | 129 ++++++++++++++++++
+ 13 files changed, 180 insertions(+), 1 deletion(-)
+ create mode 100644 apps/web/app/api/notifications/read/route.ts
+ create mode 100644 apps/web/app/api/support/[id]/messages/route.ts
+ create mode 100644 apps/web/app/api/support/route.ts
+ create mode 100644 apps/web/app/notifications/notification-actions.tsx
+ create mode 100644 apps/web/app/notifications/notifications.module.css
+ create mode 100644 apps/web/app/notifications/page.tsx
+ create mode 100644 apps/web/app/support/[id]/page.tsx
+ create mode 100644 apps/web/app/support/[id]/reply-form.tsx
+ create mode 100644 apps/web/app/support/support-form.tsx
+ create mode 100644 apps/web/app/support/support.module.css
+ create mode 100644 supabase/functions/send-email-outbox/index.ts
+ create mode 100644 supabase/migrations/20260817230000_notifications_support_email_queue.sql
+
+diff --git a/apps/web/app/api/notifications/read/route.ts b/apps/web/app/api/notifications/read/route.ts
+new file mode 100644
+index 0000000..4e90438
+--- /dev/null
++++ b/apps/web/app/api/notifications/read/route.ts
+@@ -0,0 +1,3 @@
++import { NextResponse } from 'next/server'
++import { getAuthenticatedUser,postOwnData } from '../../../../lib/supabase-rest'
++export async function POST(){const auth=await getAuthenticatedUser();if(!auth)return NextResponse.json({error:'Unauthorized'},{status:401});try{const count=await postOwnData<number>('rpc/mark_notifications_read',auth.accessToken,{p_notification_id:null});return NextResponse.json({ok:true,count})}catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Unable to update notifications'},{status:400})}}
+diff --git a/apps/web/app/api/support/[id]/messages/route.ts b/apps/web/app/api/support/[id]/messages/route.ts
+new file mode 100644
+index 0000000..f197d91
+--- /dev/null
++++ b/apps/web/app/api/support/[id]/messages/route.ts
+@@ -0,0 +1,3 @@
++import { NextRequest,NextResponse } from 'next/server'
++import { getAuthenticatedUser,postOwnData } from '../../../../../../lib/supabase-rest'
++export async function POST(request:NextRequest,{params}:{params:{id:string}}){const auth=await getAuthenticatedUser();if(!auth)return NextResponse.json({error:'Unauthorized'},{status:401});try{const body=await request.json();const id=await postOwnData<string>('rpc/add_support_message',auth.accessToken,{p_ticket_id:params.id,p_message:body.message});return NextResponse.json({ok:true,id})}catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Unable to add reply'},{status:400})}}
+diff --git a/apps/web/app/api/support/route.ts b/apps/web/app/api/support/route.ts
+new file mode 100644
+index 0000000..95b784d
+--- /dev/null
++++ b/apps/web/app/api/support/route.ts
+@@ -0,0 +1,3 @@
++import { NextRequest,NextResponse } from 'next/server'
++import { getAuthenticatedUser,postOwnData } from '../../../lib/supabase-rest'
++export async function POST(request:NextRequest){const auth=await getAuthenticatedUser();if(!auth)return NextResponse.json({error:'Unauthorized'},{status:401});try{const body=await request.json();const result=await postOwnData<string>('rpc/create_support_ticket',auth.accessToken,{p_subject:body.subject,p_category:body.category,p_message:body.message});return NextResponse.json({ok:true,ticketId:result})}catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Unable to create ticket'},{status:400})}}
+diff --git a/apps/web/app/notifications/notification-actions.tsx b/apps/web/app/notifications/notification-actions.tsx
+new file mode 100644
+index 0000000..c915fe2
+--- /dev/null
++++ b/apps/web/app/notifications/notification-actions.tsx
+@@ -0,0 +1,3 @@
++'use client'
++import { useRouter } from 'next/navigation'
++export default function NotificationActions(){const router=useRouter();return <button onClick={async()=>{await fetch('/api/notifications/read',{method:'POST'});router.refresh()}}>Mark all as read</button>}
+diff --git a/apps/web/app/notifications/notifications.module.css b/apps/web/app/notifications/notifications.module.css
+new file mode 100644
+index 0000000..a631728
+--- /dev/null
++++ b/apps/web/app/notifications/notifications.module.css
+@@ -0,0 +1 @@
++.page{min-height:100vh;background:#050b0e;color:#f4f6f4;padding:clamp(24px,7vw,90px)}.page>header{display:flex;justify-content:space-between;gap:30px;border-bottom:1px solid #1e3435}.page h1{font-size:clamp(42px,7vw,70px)}.page header small,.page a{color:#52da99}.page header>div:last-child{display:flex;gap:12px;align-items:center}.page button{background:transparent;border:1px solid #2d6b51;color:#52da99;padding:11px}.page section{max-width:900px;margin-top:35px}.page article{display:flex;justify-content:space-between;gap:20px;border:1px solid #203638;padding:22px;margin-bottom:12px}.unread{background:#0d2019}.read{background:#091316;opacity:.72}.page article h2{margin:7px 0}.page article p,.page time{color:#82918c}.page time{font-size:11px}@media(max-width:700px){.page>header,.page article{display:block}.page header>div:last-child{margin:20px 0}.page article>a{display:inline-block;margin-top:15px}}
+diff --git a/apps/web/app/notifications/page.tsx b/apps/web/app/notifications/page.tsx
+new file mode 100644
+index 0000000..c56177e
+--- /dev/null
++++ b/apps/web/app/notifications/page.tsx
+@@ -0,0 +1,8 @@
++import Link from 'next/link'
++import { redirect } from 'next/navigation'
++import { getAuthenticatedUser,getOwnData } from '../../lib/supabase-rest'
++import NotificationActions from './notification-actions'
++import styles from './notifications.module.css'
++type Notification={id:string;notification_type:string;title:string;body:string;action_url:string|null;read_at:string|null;created_at:string}
++export const dynamic='force-dynamic'
++export default async function Notifications(){const auth=await getAuthenticatedUser();if(!auth)redirect('/auth?next=/notifications');const items=await getOwnData<Notification[]>(`notifications?select=id,notification_type,title,body,action_url,read_at,created_at&user_id=eq.${auth.user.id}&order=created_at.desc&limit=100`,auth.accessToken);return <main className={styles.page}><header><div><small>TAKEPROP NOTIFICATIONS</small><h1>Account activity</h1></div><div><NotificationActions/><Link href="/dashboard">Dashboard →</Link></div></header><section>{items.length?items.map(n=><article key={n.id} className={n.read_at?styles.read:styles.unread}><div><small>{n.notification_type.replaceAll('_',' ').toUpperCase()}</small><h2>{n.title}</h2><p>{n.body}</p><time>{new Date(n.created_at).toLocaleString('tr-TR')}</time></div>{n.action_url&&<Link href={n.action_url}>Open →</Link>}</article>):<p>No notifications yet.</p>}</section></main>}
+diff --git a/apps/web/app/support/[id]/page.tsx b/apps/web/app/support/[id]/page.tsx
+new file mode 100644
+index 0000000..7239f7c
+--- /dev/null
++++ b/apps/web/app/support/[id]/page.tsx
+@@ -0,0 +1,9 @@
++import Link from 'next/link'
++import { notFound,redirect } from 'next/navigation'
++import { getAuthenticatedUser,getOwnData } from '../../../lib/supabase-rest'
++import ReplyForm from './reply-form'
++import styles from '../support.module.css'
++type Ticket={id:string;subject:string;category:string;priority:string;status:string;user_id:string;created_at:string}
++type Message={id:string;author_user_id:string;body:string;is_staff:boolean;created_at:string}
++export const dynamic='force-dynamic'
++export default async function TicketPage({params}:{params:{id:string}}){const auth=await getAuthenticatedUser();if(!auth)redirect(`/auth?next=/support/${params.id}`);const tickets=await getOwnData<Ticket[]>(`support_tickets?select=id,subject,category,priority,status,user_id,created_at&id=eq.${params.id}&limit=1`,auth.accessToken),ticket=tickets[0];if(!ticket)notFound();const messages=await getOwnData<Message[]>(`support_messages?select=id,author_user_id,body,is_staff,created_at&ticket_id=eq.${ticket.id}&order=created_at.asc`,auth.accessToken);return <main className={styles.page}><header><div><small>TICKET {ticket.id.slice(0,8).toUpperCase()}</small><h1>{ticket.subject}</h1><p>{ticket.category.toUpperCase()} · {ticket.priority.toUpperCase()} · {ticket.status.replace('_',' ').toUpperCase()}</p></div><Link href="/support">All tickets →</Link></header><section className={styles.thread}>{messages.map(m=><article key={m.id} className={m.is_staff?styles.staff:''}><b>{m.is_staff?'TakeProp support':'You'}</b><p>{m.body}</p><time>{new Date(m.created_at).toLocaleString('tr-TR')}</time></article>)}</section>{ticket.status!=='closed'&&<section className={styles.reply}><h2>Reply</h2><ReplyForm id={ticket.id}/></section>}</main>}
+diff --git a/apps/web/app/support/[id]/reply-form.tsx b/apps/web/app/support/[id]/reply-form.tsx
+new file mode 100644
+index 0000000..50d84de
+--- /dev/null
++++ b/apps/web/app/support/[id]/reply-form.tsx
+@@ -0,0 +1,4 @@
++'use client'
++import { FormEvent,useState } from 'react'
++import { useRouter } from 'next/navigation'
++export default function ReplyForm({id}:{id:string}){const router=useRouter(),[busy,setBusy]=useState(false),[error,setError]=useState('');async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();const form=e.currentTarget,message=new FormData(form).get('message');setBusy(true);setError('');const response=await fetch(`/api/support/${id}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message})}),result=await response.json().catch(()=>({}));setBusy(false);if(!response.ok){setError(result.error||'Reply failed');return}form.reset();router.refresh()}return <form onSubmit={submit}><textarea name="message" minLength={3} maxLength={5000} rows={5} required/><button disabled={busy}>{busy?'Sending…':'Send reply →'}</button>{error&&<p>{error}</p>}</form>}
+diff --git a/apps/web/app/support/page.tsx b/apps/web/app/support/page.tsx
+index 6bd19db..b62105f 100644
+--- a/apps/web/app/support/page.tsx
++++ b/apps/web/app/support/page.tsx
+@@ -1,2 +1,8 @@
+ import Link from 'next/link'
+-export default function Support(){return <main style={{minHeight:'100vh',background:'#050b0e',color:'#f4f6f4',padding:'8vw',fontFamily:'Arial'}}><small style={{color:'#52da99'}}>TAKEPROP SUPPORT</small><h1 style={{fontSize:'clamp(42px,8vw,78px)'}}>Support center</h1><p style={{color:'#899893',maxWidth:650}}>For account, payment, risk-event or payout assistance, contact the operations team with your TakeProp account ID. Never share your password or recovery codes.</p><a href="mailto:support@takeprop.com" style={{display:'inline-block',marginTop:25,padding:18,background:'#42df91',color:'#04100a',fontWeight:800}}>support@takeprop.com</a><br/><Link href="/dashboard" style={{display:'inline-block',marginTop:30,color:'#52da99'}}>← Dashboard</Link></main>}
++import { redirect } from 'next/navigation'
++import { getAuthenticatedUser,getOwnData } from '../../lib/supabase-rest'
++import SupportForm from './support-form'
++import styles from './support.module.css'
++type Ticket={id:string;subject:string;category:string;priority:string;status:string;created_at:string;updated_at:string}
++export const dynamic='force-dynamic'
++export default async function Support(){const auth=await getAuthenticatedUser();if(!auth)redirect('/auth?next=/support');const tickets=await getOwnData<Ticket[]>(`support_tickets?select=id,subject,category,priority,status,created_at,updated_at&user_id=eq.${auth.user.id}&order=updated_at.desc&limit=50`,auth.accessToken);return <main className={styles.page}><header><div><small>TAKEPROP SUPPORT</small><h1>Support center</h1><p>Create a traceable request for account, payment, trading, risk, payout or identity assistance. Never share a password or recovery code.</p></div><Link href="/dashboard">Dashboard →</Link></header><div className={styles.layout}><section><h2>New request</h2><SupportForm/></section><section><h2>Your tickets</h2>{tickets.length?tickets.map(t=><Link href={`/support/${t.id}`} key={t.id}><article><b>{t.subject}</b><span>{t.category.toUpperCase()} · {t.priority.toUpperCase()}</span><strong>{t.status.replace('_',' ').toUpperCase()}</strong><small>{t.id.slice(0,8).toUpperCase()} · {new Date(t.updated_at).toLocaleString('tr-TR')}</small></article></Link>):<p>No support requests yet.</p>}</section></div></main>}
+diff --git a/apps/web/app/support/support-form.tsx b/apps/web/app/support/support-form.tsx
+new file mode 100644
+index 0000000..d5ae88c
+--- /dev/null
++++ b/apps/web/app/support/support-form.tsx
+@@ -0,0 +1,3 @@
++'use client'
++import { FormEvent,useState } from 'react'
++export default function SupportForm(){const [busy,setBusy]=useState(false),[message,setMessage]=useState('');async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setMessage('');const form=e.currentTarget,data=new FormData(form),response=await fetch('/api/support',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(data))}),result=await response.json().catch(()=>({}));setBusy(false);if(!response.ok){setMessage(result.error||'Unable to create ticket');return}setMessage(`Ticket ${String(result.ticketId).slice(0,8).toUpperCase()} created.`);form.reset()}return <form onSubmit={submit}><label>Subject<input name="subject" minLength={5} maxLength={120} required/></label><label>Category<select name="category" required><option value="account">Account</option><option value="payment">Payment</option><option value="trading">Trading</option><option value="risk">Risk event</option><option value="payout">Payout</option><option value="kyc">KYC</option><option value="technical">Technical</option><option value="other">Other</option></select></label><label>Message<textarea name="message" minLength={3} maxLength={5000} rows={7} required/></label><button disabled={busy}>{busy?'Sending…':'Create support ticket →'}</button>{message&&<p>{message}</p>}</form>}
+diff --git a/apps/web/app/support/support.module.css b/apps/web/app/support/support.module.css
+new file mode 100644
+index 0000000..20e408b
+--- /dev/null
++++ b/apps/web/app/support/support.module.css
+@@ -0,0 +1,3 @@
++.page{min-height:100vh;background:#050b0e;color:#f4f6f4;padding:clamp(24px,7vw,90px)}.page>header{display:flex;justify-content:space-between;gap:30px;border-bottom:1px solid #1e3435;padding-bottom:32px}.page header small,.page a{color:#52da99}.page h1{font-size:clamp(42px,8vw,78px);margin:12px 0}.page header p{color:#899893;max-width:700px;line-height:1.6}.layout{display:grid;grid-template-columns:1fr 1fr;gap:28px;margin-top:45px}.layout section{border:1px solid #203638;background:#091316;padding:28px}.layout form{display:grid;gap:16px}.layout label{color:#84958f;font-size:12px}.layout input,.layout select,.layout textarea{display:block;width:100%;box-sizing:border-box;margin-top:7px;background:#050b0e;color:#fff;border:1px solid #294047;padding:14px}.layout button{background:#42df91;border:0;padding:15px;font-weight:800}.layout article{display:grid;gap:8px;border-top:1px solid #203638;padding:17px 0}.layout article span,.layout article small{color:#71817d;font-size:11px}.layout article strong{color:#52da99}@media(max-width:800px){.page>header{display:block}.layout{grid-template-columns:1fr}.layout section{padding:20px}}
++.thread{max-width:900px;margin:40px 0}.thread article{border:1px solid #203638;background:#091316;padding:20px;margin-bottom:12px}.thread .staff{border-color:#2b7354;background:#0c2119}.thread p{white-space:pre-wrap;line-height:1.6}.thread time{color:#71817d;font-size:11px}.reply{max-width:900px}.reply form{display:grid;gap:12px}.reply textarea{background:#050b0e;border:1px solid #294047;color:#fff;padding:14px}.reply button{background:#42df91;border:0;padding:14px;font-weight:800}
++.layout section>a{text-decoration:none;color:inherit}
+diff --git a/supabase/functions/send-email-outbox/index.ts b/supabase/functions/send-email-outbox/index.ts
+new file mode 100644
+index 0000000..2917ece
+--- /dev/null
++++ b/supabase/functions/send-email-outbox/index.ts
+@@ -0,0 +1,4 @@
++const response=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}})
++const render=(template:string,payload:Record<string,unknown>)=>template.replace(/{{\s*([a-zA-Z0-9_]+)\s*}}/g,(_,key)=>String(payload[key]??''))
++async function rpc(url:string,key:string,name:string,body:unknown){const result=await fetch(`${url}/rest/v1/rpc/${name}`,{method:'POST',headers:{apikey:key,authorization:`Bearer ${key}`,'content-type':'application/json'},body:JSON.stringify(body)});const json=await result.json().catch(()=>null);if(!result.ok)throw new Error(json?.message||`${name} failed`);return json}
++Deno.serve(async request=>{if(request.method!=='POST')return response({error:'Method not allowed'},405);const secret=Deno.env.get('EMAIL_WORKER_SECRET')||'',provided=request.headers.get('authorization')?.replace(/^Bearer\s+/,'')||'';if(!secret||provided!==secret)return response({error:'Unauthorized'},401);const url=Deno.env.get('SUPABASE_URL')||'',key=Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')||'',resend=Deno.env.get('RESEND_API_KEY')||'',from=Deno.env.get('EMAIL_FROM')||'TakeProp <notifications@takeprop.com>';if(!url||!key||!resend)return response({error:'Email worker is not configured'},503);try{const jobs=await rpc(url,key,'internal_claim_email_batch',{p_limit:20});let sent=0,failed=0;for(const job of jobs){try{const templates=await fetch(`${url}/rest/v1/email_templates?template_key=eq.${encodeURIComponent(job.template_key)}&select=*`,{headers:{apikey:key,authorization:`Bearer ${key}`}}).then(r=>r.json());const template=templates[0];if(!template)throw new Error('Template not found');const mail=await fetch('https://api.resend.com/emails',{method:'POST',headers:{authorization:`Bearer ${resend}`,'content-type':'application/json'},body:JSON.stringify({from,to:[job.recipient_email],subject:render(template.subject,job.payload),html:render(template.html_body,job.payload),text:render(template.text_body,job.payload)})});const result=await mail.json();if(!mail.ok)throw new Error(result?.message||'Email provider rejected delivery');await rpc(url,key,'internal_finish_email',{p_id:job.id,p_sent:true,p_provider_message_id:result.id,p_error:null});sent++}catch(error){await rpc(url,key,'internal_finish_email',{p_id:job.id,p_sent:false,p_provider_message_id:null,p_error:error instanceof Error?error.message:'Delivery failed'});failed++}}return response({ok:true,claimed:jobs.length,sent,failed})}catch(error){return response({error:error instanceof Error?error.message:'Worker failed'},500)}})
+diff --git a/supabase/migrations/20260817230000_notifications_support_email_queue.sql b/supabase/migrations/20260817230000_notifications_support_email_queue.sql
+new file mode 100644
+index 0000000..530216e
+--- /dev/null
++++ b/supabase/migrations/20260817230000_notifications_support_email_queue.sql
+@@ -0,0 +1,129 @@
++alter table public.notifications add column if not exists read_at timestamptz;
++create index if not exists notifications_unread_idx on public.notifications(user_id,created_at desc) where read_at is null;
++
++create table if not exists public.support_tickets(
++ id uuid primary key default gen_random_uuid(),user_id uuid not null references auth.users(id) on delete cascade,
++ subject text not null check(char_length(subject) between 5 and 120),category text not null check(category in ('account','payment','trading','risk','payout','kyc','technical','other')),
++ priority text not null default 'normal' check(priority in ('low','normal','high','urgent')),
++ status text not null default 'open' check(status in ('open','waiting_for_user','in_progress','resolved','closed')),
++ assigned_to uuid references auth.users(id),created_at timestamptz not null default now(),updated_at timestamptz not null default now(),closed_at timestamptz
++);
++create table if not exists public.support_messages(
++ id uuid primary key default gen_random_uuid(),ticket_id uuid not null references public.support_tickets(id) on delete cascade,
++ author_user_id uuid not null references auth.users(id),body text not null check(char_length(body) between 3 and 5000),
++ is_staff boolean not null default false,created_at timestamptz not null default now()
++);
++create index if not exists support_tickets_user_idx on public.support_tickets(user_id,updated_at desc);
++create index if not exists support_messages_ticket_idx on public.support_messages(ticket_id,created_at);
++alter table public.support_tickets enable row level security;alter table public.support_messages enable row level security;
++create policy "Users read own support tickets" on public.support_tickets for select to authenticated using((select auth.uid())=user_id or exists(select 1 from public.user_roles r where r.user_id=(select auth.uid()) and r.role in ('admin','support')));
++create policy "Users read own support messages" on public.support_messages for select to authenticated using(exists(select 1 from public.support_tickets t where t.id=ticket_id and (t.user_id=(select auth.uid()) or exists(select 1 from public.user_roles r where r.user_id=(select auth.uid()) and r.role in ('admin','support')))));
++revoke all on public.support_tickets,public.support_messages from anon;
++revoke insert,update,delete on public.support_tickets,public.support_messages from authenticated;
++grant select on public.support_tickets,public.support_messages to authenticated;
++
++create table if not exists public.email_templates(
++ template_key text primary key,subject text not null,html_body text not null,text_body text not null,updated_at timestamptz not null default now()
++);
++create table if not exists public.email_outbox(
++ id uuid primary key default gen_random_uuid(),user_id uuid not null references auth.users(id) on delete cascade,
++ recipient_email text not null,template_key text not null references public.email_templates(template_key),payload jsonb not null default '{}'::jsonb,
++ status text not null default 'queued' check(status in ('queued','sending','sent','failed','canceled')),attempts integer not null default 0,
++ next_attempt_at timestamptz not null default now(),provider_message_id text,last_error text,created_at timestamptz not null default now(),sent_at timestamptz
++);
++create index if not exists email_outbox_delivery_idx on public.email_outbox(status,next_attempt_at) where status in ('queued','failed');
++alter table public.email_templates enable row level security;alter table public.email_outbox enable row level security;
++revoke all on public.email_templates,public.email_outbox from anon,authenticated;
++
++insert into public.email_templates(template_key,subject,html_body,text_body) values
++('notification','{{title}} · TakeProp','<h1>{{title}}</h1><p>{{body}}</p><p><a href="{{action_url}}">Open TakeProp</a></p>','{{title}}\n\n{{body}}\n\n{{action_url}}'),
++('support_received','Support request received · TakeProp','<h1>We received your request</h1><p>Ticket {{ticket_id}}: {{subject}}</p>','We received ticket {{ticket_id}}: {{subject}}'),
++('support_reply','New support reply · TakeProp','<h1>Your support request has an update</h1><p>{{subject}}</p><p><a href="{{action_url}}">Read reply</a></p>','Your support request has an update: {{subject}}\n{{action_url}}')
++on conflict(template_key) do update set subject=excluded.subject,html_body=excluded.html_body,text_body=excluded.text_body,updated_at=now();
++
++create or replace function public.create_support_ticket(p_subject text,p_category text,p_message text)
++returns uuid language plpgsql security definer set search_path=''
++as $function$
++declare v_user uuid:=auth.uid();v_id uuid;v_email text;
++begin
++ if v_user is null then raise exception 'Authentication required';end if;
++ insert into public.support_tickets(user_id,subject,category,priority) values(v_user,trim(p_subject),p_category,case when p_category in ('payment','risk','payout') then 'high' else 'normal' end) returning id into v_id;
++ insert into public.support_messages(ticket_id,author_user_id,body) values(v_id,v_user,trim(p_message));
++ select email into v_email from auth.users where id=v_user;
++ insert into public.email_outbox(user_id,recipient_email,template_key,payload) values(v_user,v_email,'support_received',jsonb_build_object('ticket_id',v_id,'subject',trim(p_subject)));
++ insert into public.notifications(user_id,notification_type,title,body,action_url) values(v_user,'support_received','Support request received','Ticket '||upper(substr(v_id::text,1,8))||' was created.','/support');
++ return v_id;
++end;$function$;
++
++create or replace function public.mark_notifications_read(p_notification_id uuid default null)
++returns integer language plpgsql security definer set search_path=''
++as $function$
++declare v_count integer;
++begin
++ if auth.uid() is null then raise exception 'Authentication required';end if;
++ update public.notifications set read_at=coalesce(read_at,now()) where user_id=auth.uid() and (p_notification_id is null or id=p_notification_id);
++ get diagnostics v_count=row_count;return v_count;
++end;$function$;
++
++create or replace function public.internal_enqueue_notification_email()
++returns trigger language plpgsql security definer set search_path=''
++as $function$
++declare v_email text;
++begin
++ if new.notification_type='support_received' then return new;end if;
++ select email into v_email from auth.users where id=new.user_id;
++ if v_email is not null then insert into public.email_outbox(user_id,recipient_email,template_key,payload) values(new.user_id,v_email,'notification',jsonb_build_object('title',new.title,'body',new.body,'action_url',coalesce(new.action_url,'/dashboard')));end if;
++ return new;
++end;$function$;
++drop trigger if exists enqueue_notification_email on public.notifications;
++create trigger enqueue_notification_email after insert on public.notifications for each row execute function public.internal_enqueue_notification_email();
++
++revoke all on function public.create_support_ticket(text,text,text) from public,anon;
++revoke all on function public.mark_notifications_read(uuid) from public,anon;
++revoke all on function public.internal_enqueue_notification_email() from public,anon,authenticated;
++grant execute on function public.create_support_ticket(text,text,text) to authenticated;
++grant execute on function public.mark_notifications_read(uuid) to authenticated;
++
++create or replace function public.add_support_message(p_ticket_id uuid,p_message text)
++returns uuid language plpgsql security definer set search_path=''
++as $function$
++declare v_user uuid:=auth.uid();v_ticket public.support_tickets%rowtype;v_staff boolean;v_id uuid;v_email text;
++begin
++ if v_user is null then raise exception 'Authentication required';end if;
++ select * into v_ticket from public.support_tickets where id=p_ticket_id for update;
++ if not found then raise exception 'Ticket not found';end if;
++ v_staff:=exists(select 1 from public.user_roles where user_id=v_user and role in('admin','support'));
++ if v_ticket.user_id<>v_user and not v_staff then raise exception 'Not authorized';end if;
++ if v_ticket.status='closed' then raise exception 'This ticket is closed';end if;
++ insert into public.support_messages(ticket_id,author_user_id,body,is_staff) values(p_ticket_id,v_user,trim(p_message),v_staff) returning id into v_id;
++ update public.support_tickets set status=case when v_staff then 'waiting_for_user' else 'in_progress' end,assigned_to=case when v_staff then coalesce(assigned_to,v_user) else assigned_to end,updated_at=now() where id=p_ticket_id;
++ if v_staff then
++  select email into v_email from auth.users where id=v_ticket.user_id;
++  insert into public.email_outbox(user_id,recipient_email,template_key,payload) values(v_ticket.user_id,v_email,'support_reply',jsonb_build_object('subject',v_ticket.subject,'action_url','/support/'||p_ticket_id));
++  insert into public.notifications(user_id,notification_type,title,body,action_url) values(v_ticket.user_id,'support_reply','New support reply',v_ticket.subject,'/support/'||p_ticket_id);
++ end if;
++ return v_id;
++end;$function$;
++revoke all on function public.add_support_message(uuid,text) from public,anon;
++grant execute on function public.add_support_message(uuid,text) to authenticated;
++
++create or replace function public.internal_claim_email_batch(p_limit integer default 20)
++returns setof public.email_outbox language plpgsql security definer set search_path=''
++as $function$
++begin
++ return query update public.email_outbox e set status='sending',attempts=e.attempts+1
++ where e.id in(select id from public.email_outbox where status in('queued','failed') and next_attempt_at<=now() order by created_at for update skip locked limit least(greatest(p_limit,1),100))
++ returning e.*;
++end;$function$;
++create or replace function public.internal_finish_email(p_id uuid,p_sent boolean,p_provider_message_id text,p_error text)
++returns void language plpgsql security definer set search_path=''
++as $function$
++begin
++ update public.email_outbox set status=case when p_sent then 'sent' when attempts>=5 then 'canceled' else 'failed' end,
++ provider_message_id=case when p_sent then p_provider_message_id else provider_message_id end,last_error=case when p_sent then null else left(p_error,1000) end,
++ sent_at=case when p_sent then now() else sent_at end,next_attempt_at=case when p_sent then next_attempt_at else now()+make_interval(mins=>least(60,power(2,attempts)::integer)) end where id=p_id;
++end;$function$;
++revoke all on function public.internal_claim_email_batch(integer) from public,anon,authenticated;
++revoke all on function public.internal_finish_email(uuid,boolean,text,text) from public,anon,authenticated;
++grant execute on function public.internal_claim_email_batch(integer) to service_role;
++grant execute on function public.internal_finish_email(uuid,boolean,text,text) to service_role;
+-- 
+2.51.1
+
