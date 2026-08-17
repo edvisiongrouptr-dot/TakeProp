@@ -1,0 +1,21 @@
+From 9e7e1887bef4263d6ec2a99821e1fb565e4f6393 Mon Sep 17 00:00:00 2001
+From: Codex <codex@openai.com>
+Date: Mon, 17 Aug 2026 11:06:00 +0200
+Subject: [PATCH] Fix sitemap compatibility with Next.js 13
+
+---
+ apps/web/app/sitemap.ts | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/apps/web/app/sitemap.ts b/apps/web/app/sitemap.ts
+index 05103f9..c8191cb 100644
+--- a/apps/web/app/sitemap.ts
++++ b/apps/web/app/sitemap.ts
+@@ -1,2 +1,2 @@
+ import { MetadataRoute } from 'next'
+-export default function sitemap():MetadataRoute.Sitemap{return[{url:'https://takeprop.vercel.app',lastModified:new Date(),changeFrequency:'weekly',priority:1},{url:'https://takeprop.vercel.app/auth',lastModified:new Date(),changeFrequency:'monthly',priority:.5}]}
++export default function sitemap():MetadataRoute.Sitemap{return[{url:'https://takeprop.vercel.app',lastModified:new Date()},{url:'https://takeprop.vercel.app/auth',lastModified:new Date()}]}
+-- 
+2.51.1
+
+
