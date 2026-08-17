@@ -5,7 +5,7 @@ const windows=new Map<string,{count:number;resetAt:number}>()
 
 function requestKey(request:NextRequest){
  const forwarded=request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
- return `${forwarded||request.ip||'unknown'}:${request.nextUrl.pathname}`
+ return `${forwarded||request.headers.get('x-real-ip')||'unknown'}:${request.nextUrl.pathname}`
 }
 
 function enforceRequestSecurity(request:NextRequest){
@@ -24,7 +24,7 @@ function enforceRequestSecurity(request:NextRequest){
  return null
 }
 
-export async function middleware(request:NextRequest){
+export async function proxy(request:NextRequest){
  const securityResponse=enforceRequestSecurity(request)
  if(securityResponse)return securityResponse
  if(request.nextUrl.pathname.startsWith('/api/'))return NextResponse.next()

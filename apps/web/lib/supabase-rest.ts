@@ -15,7 +15,8 @@ export function supabaseConfig() {
 export function authCookies() { return { accessCookie, refreshCookie } }
 
 export async function getAuthenticatedUser(): Promise<{ user: AuthUser; accessToken: string } | null> {
-  const accessToken = cookies().get(accessCookie)?.value
+  const cookieStore = await cookies()
+  const accessToken = cookieStore.get(accessCookie)?.value
   if (!accessToken) return null
   const { url, key } = supabaseConfig()
   const response = await fetch(`${url}/auth/v1/user`, { headers: { apikey: key, Authorization: `Bearer ${accessToken}` }, cache: 'no-store' })
