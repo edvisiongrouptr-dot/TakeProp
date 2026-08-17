@@ -17,7 +17,9 @@ export async function POST(request: Request) {
     if (typeof planId !== 'string') return NextResponse.json({ error: 'Choose a valid challenge plan.' }, { status: 400 })
     const selected = typeof network === 'string' ? networks[network as keyof typeof networks] : undefined
     if (!selected) return NextResponse.json({ error: 'Choose a supported USDT network.' }, { status: 400 })
-    if (typeof txHash !== 'string' || !/^[A-Za-z0-9+/_=-]{20,100}$/.test(txHash.trim())) return NextResponse.json({ error: 'Enter a valid transaction hash for the selected network.' }, { status: 400 })
+    const normalized=typeof txHash==='string'?txHash.trim():''
+    const validHash=network==='bep20'||network==='erc20'?/^0x[0-9a-fA-F]{64}$/.test(normalized):network==='trc20'?/^[0-9a-fA-F]{64}$/.test(normalized):/^[A-Za-z0-9_-]{43,44}$/.test(normalized)
+    if (!validHash) return NextResponse.json({ error: 'Enter a valid transaction hash for the selected network.' }, { status: 400 })
     const plans = await getOwnData<Plan[]>(`challenge_plans?select=id,slug,name,account_size,price,currency,version,rules&id=eq.${encodeURIComponent(planId)}&is_active=eq.true&limit=1`, auth.accessToken)
     const plan = plans[0]
     if (!plan) return NextResponse.json({ error: 'This challenge plan is unavailable.' }, { status: 404 })
@@ -29,7 +31,7 @@ export async function POST(request: Request) {
       status: 'pending',
       payment_provider: selected.provider,
       provider_checkout_id: selected.wallet,
-      provider_payment_id: txHash.trim().toLowerCase(),
+      provider_payment_id: normalized,
       plan_version: plan.version,
       plan_snapshot: { slug: plan.slug, name: plan.name, account_size: plan.account_size, price: plan.price, currency: plan.currency, rules: plan.rules }
     })
