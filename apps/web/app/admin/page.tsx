@@ -12,6 +12,7 @@ type Payout={id:string;user_id:string;amount:number;currency:string;status:strin
 type Account={id:string;user_id:string;display_account_id:string;phase:string;status:string;balance:number;equity:number;evaluation_step:number;evaluation_steps:number;created_at:string}
 type Risk={id:string;user_id:string;account_id:string;event_type:string;severity:string;status:string;measured_value:number;limit_value:number;created_at:string}
 type Audit={id:string;actor_user_id:string;action:string;entity_type:string;reason:string|null;created_at:string}
+type Ticket={id:string;user_id:string;subject:string;category:string;priority:string;status:string;updated_at:string}
 export const dynamic='force-dynamic'
 
 export default async function AdminPage(){
@@ -19,13 +20,14 @@ export default async function AdminPage(){
  const roles=await getOwnData<Role[]>(`user_roles?select=role&user_id=eq.${auth.user.id}`,auth.accessToken)
  if(!roles.some(r=>r.role==='admin'||r.role==='finance'))redirect('/dashboard')
  const isAdmin=roles.some(r=>r.role==='admin')
- const [orders,profiles,payouts,accounts,risks,audit]=await Promise.all([
+ const [orders,profiles,payouts,accounts,risks,audit,tickets]=await Promise.all([
   getOwnData<Order[]>('orders?select=id,user_id,amount,currency,status,payment_provider,provider_payment_id,created_at,challenge_plans(name,account_size)&payment_provider=like.usdt_*&order=created_at.desc&limit=100',auth.accessToken),
   getOwnData<Profile[]>('profiles?select=id,full_name,kyc_status,created_at&order=created_at.desc&limit=200',auth.accessToken),
   getOwnData<Payout[]>('payout_requests?select=id,user_id,amount,currency,status,method,destination_ref,provider_payout_id,requested_at&order=requested_at.desc&limit=100',auth.accessToken),
   isAdmin?getOwnData<Account[]>('trading_accounts?select=id,user_id,display_account_id,phase,status,balance,equity,evaluation_step,evaluation_steps,created_at&order=created_at.desc&limit=200',auth.accessToken):Promise.resolve([]),
   isAdmin?getOwnData<Risk[]>('risk_events?select=id,user_id,account_id,event_type,severity,status,measured_value,limit_value,created_at&order=created_at.desc&limit=100',auth.accessToken):Promise.resolve([]),
-  isAdmin?getOwnData<Audit[]>('admin_audit_log?select=id,actor_user_id,action,entity_type,reason,created_at&order=created_at.desc&limit=100',auth.accessToken):Promise.resolve([])
+  isAdmin?getOwnData<Audit[]>('admin_audit_log?select=id,actor_user_id,action,entity_type,reason,created_at&order=created_at.desc&limit=100',auth.accessToken):Promise.resolve([]),
+  isAdmin?getOwnData<Ticket[]>('support_tickets?select=id,user_id,subject,category,priority,status,updated_at&order=updated_at.desc&limit=100',auth.accessToken):Promise.resolve([])
  ])
  const names=new Map(profiles.map(p=>[p.id,p.full_name||p.id.slice(0,8)])),pending=orders.filter(o=>o.status==='pending'),reviewed=orders.filter(o=>o.status!=='pending')
  return <main className={styles.page}>
@@ -34,6 +36,7 @@ export default async function AdminPage(){
   <section><Title label="Review history" count={reviewed.length}/><div className={styles.grid}>{reviewed.map(o=><PaymentCard key={o.id} order={o} name={names.get(o.user_id)||o.user_id.slice(0,8)}/>)}</div></section>
   <section><Title label="Payout operations" count={payouts.length}/><div className={styles.grid}>{payouts.map(p=><article key={p.id} className={styles.card}><Head status={p.status} date={p.requested_at}/><h3>{Number(p.amount).toFixed(2)} {p.currency}</h3><dl><Info label="Trader" value={names.get(p.user_id)||p.user_id.slice(0,8)}/><Info label="Network" value={p.method}/></dl><label>Destination</label><code>{p.destination_ref||'—'}</code>{p.provider_payout_id&&<><label>Payout transaction</label><code>{p.provider_payout_id}</code></>}<PayoutActions id={p.id} status={p.status}/></article>)}</div></section>
   {isAdmin&&<><section><Title label="Trader identity review" count={profiles.length}/><div className={styles.table}>{profiles.map(p=><article key={p.id}><div><b>{p.full_name||'Unnamed trader'}</b><small>{p.id}</small></div><strong>{p.kyc_status.replace('_',' ').toUpperCase()}</strong><time>{new Date(p.created_at).toLocaleDateString('tr-TR')}</time><AccountActions kind="kyc" id={p.id} current={p.kyc_status}/></article>)}</div></section>
+  <section><Title label="Support queue" count={tickets.length}/><div className={styles.table}>{tickets.map(t=><article key={t.id}><div><b>{t.subject}</b><small>{names.get(t.user_id)||t.user_id.slice(0,8)} · {t.category} · {t.priority}</small></div><strong>{t.status.replace('_',' ').toUpperCase()}</strong><time>{new Date(t.updated_at).toLocaleString('tr-TR')}</time><Link href={`/support/${t.id}`}>Open ticket →</Link></article>)}</div></section>
   <section><Title label="Trading accounts" count={accounts.length}/><div className={styles.table}>{accounts.map(a=><article key={a.id}><div><b>{a.display_account_id}</b><small>{names.get(a.user_id)||a.user_id.slice(0,8)} · {a.phase} · step {a.evaluation_step}/{a.evaluation_steps}</small></div><strong>{a.status.toUpperCase()}</strong><span>{Number(a.equity).toFixed(2)} / {Number(a.balance).toFixed(2)}</span><AccountActions kind="account" id={a.id} current={a.status}/></article>)}</div></section>
   <section><Title label="Risk events" count={risks.length}/><div className={styles.table}>{risks.map(r=><article key={r.id}><div><b>{r.event_type.replaceAll('_',' ')}</b><small>{names.get(r.user_id)||r.user_id.slice(0,8)} · {r.severity}</small></div><strong>{r.status.toUpperCase()}</strong><span>{Number(r.measured_value).toFixed(2)} / {Number(r.limit_value).toFixed(2)}</span>{r.status!=='resolved'?<AccountActions kind="risk" id={r.id}/>:<i>Resolved</i>}</article>)}</div></section>
   <section><Title label="Audit log" count={audit.length}/><div className={styles.audit}>{audit.map(a=><article key={a.id}><b>{a.action.replaceAll('_',' ')}</b><span>{a.entity_type}</span><p>{a.reason||'No note'}</p><time>{new Date(a.created_at).toLocaleString('tr-TR')}</time></article>)}</div></section></>}
