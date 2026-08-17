@@ -63,12 +63,19 @@ Deno.serve(async (req: Request) => {
 
     const market = await allMarkPrices();
     const marks = market.marks;
-    let rpc = "internal_sync_sim_account";
+    let rpc = "internal_advanced_snapshot";
     let payload: Record<string, unknown> = { p_user_id: user.id, p_account_id: accountId, p_marks: marks };
     if (action === "open") {
       const symbol = String(body.symbol || "").toUpperCase();
-      rpc = "internal_open_sim_trade";
-      payload = { ...payload, p_symbol: symbol, p_side: body.side, p_margin: Number(body.margin), p_leverage: Number(body.leverage), p_mark: marks[symbol] };
+      rpc = "internal_open_sim_trade_advanced";
+      payload = { ...payload, p_symbol: symbol, p_side: body.side, p_margin: Number(body.margin), p_leverage: Number(body.leverage), p_mark: marks[symbol], p_stop_loss: body.stopLoss ? Number(body.stopLoss) : null, p_take_profit: body.takeProfit ? Number(body.takeProfit) : null };
+    } else if (action === "place_pending") {
+      const symbol = String(body.symbol || "").toUpperCase();
+      rpc = "internal_place_pending_order";
+      payload = { p_user_id: user.id, p_account_id: accountId, p_symbol: symbol, p_side: body.side, p_order_type: body.orderType, p_margin: Number(body.margin), p_leverage: Number(body.leverage), p_trigger_price: Number(body.triggerPrice), p_stop_loss: body.stopLoss ? Number(body.stopLoss) : null, p_take_profit: body.takeProfit ? Number(body.takeProfit) : null, p_current_mark: marks[symbol] };
+    } else if (action === "cancel_pending") {
+      rpc = "internal_cancel_pending_order";
+      payload = { p_user_id: user.id, p_account_id: accountId, p_order_id: body.orderId };
     } else if (action === "close") {
       const symbol = String(body.symbol || "").toUpperCase();
       rpc = "internal_close_sim_trade";
@@ -89,7 +96,14 @@ Deno.serve(async (req: Request) => {
     });
     const finalResult = await finalRes.json().catch(() => result);
     if (!finalRes.ok) return json({ error: finalResult.message || "Risk finalization failed" }, 400);
-    return json({ ...finalResult, marks, markSource: market.source, serverTime: new Date().toISOString() });
+    const snapshotRes = await fetch(`${supabaseUrl}/rest/v1/rpc/internal_advanced_snapshot`, {
+      method: "POST",
+      headers: { apikey: serviceKey, authorization: `Bearer ${serviceKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ p_user_id: user.id, p_account_id: accountId, p_marks: marks }),
+    });
+    const snapshot = await snapshotRes.json().catch(() => finalResult);
+    if (!snapshotRes.ok) return json({ error: snapshot.message || "Account snapshot failed" }, 400);
+    return json({ ...snapshot, marks, markSource: market.source, serverTime: new Date().toISOString() });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "Trading service unavailable" }, 500);
   }
