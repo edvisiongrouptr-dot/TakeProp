@@ -48,4 +48,4 @@ export async function middleware(request:NextRequest){
  const response=NextResponse.redirect(new URL('/auth',request.url));response.cookies.delete(accessName);response.cookies.delete(refreshName);return response
 }
 
-export const config={matcher:['/dashboard/:path*','/terminal/:path*','/payouts/:path*','/admin/:path*','/support/:path*','/notifications/:path*','/api/:path*']}
+export const config={matcher:['/dashboard/:path*','/terminal/:path*','/payouts/:path*','/kyc/:path*','/admin/:path*','/support/:path*','/notifications/:path*','/api/:path*']}

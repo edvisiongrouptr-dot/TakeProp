@@ -1,0 +1,8 @@
+import {redirect} from 'next/navigation'
+import Link from 'next/link'
+import {getAuthenticatedUser,getOwnData} from '../../lib/supabase-rest'
+import StartButton from './start-button'
+import styles from './kyc.module.css'
+type Profile={kyc_status:string};type Session={status:string;verification_url:string|null;updated_at:string}
+export const dynamic='force-dynamic'
+export default async function KycPage(){const auth=await getAuthenticatedUser();if(!auth)redirect('/auth');const [profiles,sessions]=await Promise.all([getOwnData<Profile[]>(`profiles?select=kyc_status&id=eq.${auth.user.id}&limit=1`,auth.accessToken),getOwnData<Session[]>('kyc_sessions?select=status,verification_url,updated_at&order=created_at.desc&limit=1',auth.accessToken)]);const status=profiles[0]?.kyc_status||'not_started',session=sessions[0];return <main className={styles.page}><section className={styles.card}><small>SECURE IDENTITY CHECK</small><h1>Identity verification</h1><p>KYC is required before a performance reward can be paid. Documents are collected by the configured verification provider, not stored in the public website.</p><div className={styles.status}>Current status: <b>{status.replace('_',' ').toUpperCase()}</b></div>{status==='approved'?<Link className="btn" href="/dashboard">Return to dashboard →</Link>:session?.verification_url&&['pending','in_review'].includes(session.status)?<a className="btn" href={session.verification_url}>Continue verification →</a>:<StartButton/>}<p><Link href="/aml-kyc">Read the AML/KYC policy</Link> · <Link href="/support">Contact support</Link></p></section></main>}

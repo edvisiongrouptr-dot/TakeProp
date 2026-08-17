@@ -1,0 +1,3 @@
+'use client'
+import {useState} from 'react'
+export default function StartButton(){const [busy,setBusy]=useState(false),[error,setError]=useState('');async function start(){setBusy(true);setError('');const response=await fetch('/api/kyc',{method:'POST'}),result=await response.json().catch(()=>({}));if(!response.ok||!result.url){setBusy(false);setError(result.error||'Unable to start verification');return}location.assign(result.url)}return <><button className="btn" disabled={busy} onClick={start}>{busy?'Opening secure verification…':'Start identity verification →'}</button>{error&&<p>{error}</p>}</>}
