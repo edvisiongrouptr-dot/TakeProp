@@ -4,7 +4,6 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
   status,
   headers: { "content-type": "application/json", "cache-control": "no-store" },
 });
-
 function envKey(name: string, fallback: string) {
   const direct = Deno.env.get(name);
   if (direct) return direct;
@@ -16,18 +15,33 @@ function envKey(name: string, fallback: string) {
   } catch { return raw; }
 }
 
-async function markPrice(symbol: string) {
-  if (!symbols.includes(symbol as typeof symbols[number])) throw new Error("Unsupported symbol");
+async function fetchJson(url: string) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 5000);
+  const timer = setTimeout(() => controller.abort(), 4500);
   try {
-    const res = await fetch(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`, { signal: controller.signal });
-    if (!res.ok) throw new Error("Market price provider unavailable");
-    const data = await res.json();
-    const price = Number(data.markPrice);
-    if (!Number.isFinite(price) || price <= 0) throw new Error("Invalid market price");
-    return price;
+    const res = await fetch(url, { signal: controller.signal, headers: { "user-agent": "TakeProp-Market-Data/1.0" } });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return await res.json();
   } finally { clearTimeout(timer); }
+}
+
+async function allMarkPrices() {
+  const cryptoCompare = fetchJson("https://min-api.cryptocompare.com/data/pricemulti?fsyms=BTC,ETH,SOL,BNB&tsyms=USDT")
+    .then(x => ({ BTCUSDT:Number(x?.BTC?.USDT), ETHUSDT:Number(x?.ETH?.USDT), SOLUSDT:Number(x?.SOL?.USDT), BNBUSDT:Number(x?.BNB?.USDT) }));
+  const coinGecko = fetchJson("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,binancecoin,tether&vs_currencies=usd")
+    .then(x => { const peg=Number(x?.tether?.usd)||1; return { BTCUSDT:Number(x?.bitcoin?.usd)/peg, ETHUSDT:Number(x?.ethereum?.usd)/peg, SOLUSDT:Number(x?.solana?.usd)/peg, BNBUSDT:Number(x?.binancecoin?.usd)/peg }; });
+  const settled = await Promise.allSettled([cryptoCompare, coinGecko]);
+  const providers = settled.flatMap(x => x.status === "fulfilled" ? [x.value] : []);
+  if (!providers.length) throw new Error("Market price providers unavailable");
+  const marks: Record<string,number> = {};
+  for (const symbol of symbols) {
+    const values=providers.map(x=>Number(x[symbol])).filter(x=>Number.isFinite(x)&&x>0).sort((a,b)=>a-b);
+    if (!values.length) throw new Error(`Market price unavailable for ${symbol}`);
+    const mark=values.length===1?values[0]:(values[0]+values[1])/2;
+    if(values.length>1&&(values[1]-values[0])/mark>0.015)throw new Error(`Market price validation failed for ${symbol}`);
+    marks[symbol]=mark;
+  }
+  return { marks, source: providers.length>1 ? "Validated CryptoCompare + CoinGecko reference price" : "Validated reference market price" };
 }
 
 Deno.serve(async (req: Request) => {
@@ -47,8 +61,8 @@ Deno.serve(async (req: Request) => {
     const accountId = String(body.accountId || "");
     if (!accountId) return json({ error: "Account is required" }, 400);
 
-    const marksEntries = await Promise.all(symbols.map(async symbol => [symbol, await markPrice(symbol)] as const));
-    const marks = Object.fromEntries(marksEntries);
+    const market = await allMarkPrices();
+    const marks = market.marks;
     let rpc = "internal_sync_sim_account";
     let payload: Record<string, unknown> = { p_user_id: user.id, p_account_id: accountId, p_marks: marks };
     if (action === "open") {
@@ -68,7 +82,14 @@ Deno.serve(async (req: Request) => {
     });
     const result = await rpcRes.json().catch(() => ({}));
     if (!rpcRes.ok) return json({ error: result.message || "Trading action failed" }, 400);
-    return json({ ...result, marks, markSource: "Binance USD-M mark price", serverTime: new Date().toISOString() });
+    const finalRes = await fetch(`${supabaseUrl}/rest/v1/rpc/internal_finalize_sim_account`, {
+      method: "POST",
+      headers: { apikey: serviceKey, authorization: `Bearer ${serviceKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ p_user_id: user.id, p_account_id: accountId, p_marks: marks }),
+    });
+    const finalResult = await finalRes.json().catch(() => result);
+    if (!finalRes.ok) return json({ error: finalResult.message || "Risk finalization failed" }, 400);
+    return json({ ...finalResult, marks, markSource: market.source, serverTime: new Date().toISOString() });
   } catch (error) {
     return json({ error: error instanceof Error ? error.message : "Trading service unavailable" }, 500);
   }
