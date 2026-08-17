@@ -61,6 +61,14 @@ Deno.serve(async (req: Request) => {
     const accountId = String(body.accountId || "");
     if (!accountId) return json({ error: "Account is required" }, 400);
 
+    const limitRes = await fetch(`${supabaseUrl}/rest/v1/rpc/internal_consume_rate_limit`, {
+      method: "POST",
+      headers: { apikey: serviceKey, authorization: `Bearer ${serviceKey}`, "content-type": "application/json" },
+      body: JSON.stringify({ p_scope: `sim-trading:${action}`, p_subject_hash: `${user.id}:${accountId}`, p_limit: action === "snapshot" ? 30 : 12, p_window_seconds: 60 }),
+    });
+    const allowed = await limitRes.json().catch(() => false);
+    if (!limitRes.ok || allowed !== true) return json({ error: "Too many trading requests. Please wait and retry." }, 429);
+
     const market = await allMarkPrices();
     const marks = market.marks;
     let rpc = "internal_advanced_snapshot";

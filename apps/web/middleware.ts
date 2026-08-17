@@ -1,8 +1,33 @@
 import { NextRequest, NextResponse } from 'next/server'
 
 const accessName='takeprop-access-token',refreshName='takeprop-refresh-token'
+const windows=new Map<string,{count:number;resetAt:number}>()
+
+function requestKey(request:NextRequest){
+ const forwarded=request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+ return `${forwarded||request.ip||'unknown'}:${request.nextUrl.pathname}`
+}
+
+function enforceRequestSecurity(request:NextRequest){
+ if(!request.nextUrl.pathname.startsWith('/api/'))return null
+ const mutation=!['GET','HEAD','OPTIONS'].includes(request.method)
+ if(mutation&&!request.nextUrl.pathname.startsWith('/api/cron/')){
+  const origin=request.headers.get('origin')
+  if(origin&&origin!==request.nextUrl.origin)return NextResponse.json({error:'Invalid request origin.'},{status:403})
+ }
+ const now=Date.now(),key=requestKey(request),current=windows.get(key)
+ if(!current||current.resetAt<=now)windows.set(key,{count:1,resetAt:now+60_000})
+ else{
+  current.count+=1
+  if(current.count>60)return NextResponse.json({error:'Too many requests. Please try again shortly.'},{status:429,headers:{'Retry-After':String(Math.ceil((current.resetAt-now)/1000))}})
+ }
+ return null
+}
 
 export async function middleware(request:NextRequest){
+ const securityResponse=enforceRequestSecurity(request)
+ if(securityResponse)return securityResponse
+ if(request.nextUrl.pathname.startsWith('/api/'))return NextResponse.next()
  const access=request.cookies.get(accessName)?.value,refresh=request.cookies.get(refreshName)?.value
  const url=process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/,'')
  const key=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
@@ -23,4 +48,4 @@ export async function middleware(request:NextRequest){
  const response=NextResponse.redirect(new URL('/auth',request.url));response.cookies.delete(accessName);response.cookies.delete(refreshName);return response
 }
 
-export const config={matcher:['/dashboard/:path*','/terminal/:path*','/payouts/:path*','/admin/:path*']}
+export const config={matcher:['/dashboard/:path*','/terminal/:path*','/payouts/:path*','/admin/:path*','/support/:path*','/notifications/:path*','/api/:path*']}
