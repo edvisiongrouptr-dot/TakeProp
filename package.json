@@ -12,6 +12,7 @@
     "lint": "pnpm -w -r run lint",
     "test": "pnpm -w -r run test",
     "verify:release": "node scripts/verify-release.mjs",
+    "verify:environment": "node scripts/verify-environment.mjs",
     "smoke:production": "node scripts/smoke-production.mjs"
   }
 }
