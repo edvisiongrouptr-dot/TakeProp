@@ -1,0 +1,3 @@
+.brand{display:inline-block!important;width:190px!important;height:58px!important;min-width:190px;background:url('/brand/takeprop-logo.png') left center/contain no-repeat!important;line-height:0!important}
+.brand>b,.brand>strong{visibility:hidden!important}
+@media(max-width:640px){.brand{width:145px!important;height:46px!important;min-width:145px}}
