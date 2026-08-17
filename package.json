@@ -1,0 +1,15 @@
+{
+  "name": "takeprop",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "pnpm -w -r run dev",
+    "build": "pnpm -w -r run build",
+    "lint": "pnpm -w -r run lint",
+    "test": "pnpm -w -r run test"
+  }
+}
