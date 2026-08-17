@@ -1,0 +1,3 @@
+'use client'
+import Link from 'next/link'
+export default function ErrorPage({reset}:{reset:()=>void}){return <main style={{minHeight:'100vh',display:'grid',placeItems:'center',padding:24}}><section style={{maxWidth:620,border:'1px solid #20343a',padding:40}}><small style={{color:'#43e28a'}}>TAKEPROP · RECOVERY</small><h1>Something went wrong.</h1><p>The request could not be completed safely. No real trade was placed. Try again or contact support if the problem continues.</p><button className="btn" onClick={reset}>Try again →</button> <Link href="/support">Contact support</Link></section></main>}

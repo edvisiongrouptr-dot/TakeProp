@@ -23,4 +23,4 @@ export async function middleware(request:NextRequest){
  const response=NextResponse.redirect(new URL('/auth',request.url));response.cookies.delete(accessName);response.cookies.delete(refreshName);return response
 }
 
-export const config={matcher:['/dashboard/:path*']}
+export const config={matcher:['/dashboard/:path*','/terminal/:path*','/payouts/:path*','/admin/:path*']}

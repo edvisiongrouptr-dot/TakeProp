@@ -1,2 +1,3 @@
 import { MetadataRoute } from 'next'
-export default function sitemap():MetadataRoute.Sitemap{return[{url:'https://takeprop.vercel.app',lastModified:new Date()},{url:'https://takeprop.vercel.app/auth',lastModified:new Date()}]}
+const paths=['','/auth','/support','/terms','/privacy','/risk-disclosure','/refund-policy','/aml-kyc']
+export default function sitemap():MetadataRoute.Sitemap{const lastModified=new Date();return paths.map(path=>({url:`https://takeprop.vercel.app${path}`,lastModified}))}
