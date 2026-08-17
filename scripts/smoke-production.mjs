@@ -1,4 +1,4 @@
-const base=(process.env.TAKEPROP_PRODUCTION_URL||'https://takeprop.vercel.app').replace(/\/$/,'')
+const base=(process.env.TAKEPROP_PRODUCTION_URL||process.env.NEXT_PUBLIC_SITE_URL||'https://takeprop.vercel.app').replace(/\/$/,'')
 const checks=[['/',200],['/auth',200],['/terms',200],['/privacy',200],['/risk-disclosure',200],['/api/health',200]]
 const failures=[]
 for(const [path,status] of checks){
