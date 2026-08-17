@@ -1,15 +1,20 @@
 import { NextResponse } from 'next/server'
+import { createHash } from 'node:crypto'
 import { authCookies, supabaseConfig } from '../../../../lib/supabase-rest'
+
+const LEGAL_VERSION = '2026-08-17'
 
 export async function POST(request: Request) {
   try {
-    const { fullName, email, password } = await request.json()
+    const { fullName, email, password, acceptedTerms, acceptedPrivacy, acceptedRisk, ageConfirmed } = await request.json()
     if (typeof fullName !== 'string' || fullName.trim().length < 2) return NextResponse.json({ error: 'Enter your full name.' }, { status: 400 })
     if (typeof email !== 'string' || !email.includes('@')) return NextResponse.json({ error: 'Enter a valid email.' }, { status: 400 })
     if (typeof password !== 'string' || password.length < 8) return NextResponse.json({ error: 'Password must contain at least 8 characters.' }, { status: 400 })
+    if (!acceptedTerms || !acceptedPrivacy || !acceptedRisk || !ageConfirmed) return NextResponse.json({ error: 'Confirm your eligibility and accept all required legal documents.' }, { status: 400 })
     const { url, key } = supabaseConfig(); const origin = new URL(request.url).origin
+    const evidence=createHash('sha256').update([request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()||'unknown',request.headers.get('user-agent')||'unknown',process.env.LEGAL_ACCEPTANCE_SALT||'takeprop'].join('|')).digest('hex')
     const redirectTo=encodeURIComponent(`${origin}/auth?verified=1`)
-    const authResponse = await fetch(`${url}/auth/v1/signup?redirect_to=${redirectTo}`, { method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim().toLowerCase(), password, data: { full_name: fullName.trim() } }), cache: 'no-store' })
+    const authResponse = await fetch(`${url}/auth/v1/signup?redirect_to=${redirectTo}`, { method: 'POST', headers: { apikey: key, 'Content-Type': 'application/json' }, body: JSON.stringify({ email: email.trim().toLowerCase(), password, data: { full_name: fullName.trim(),legal_version:LEGAL_VERSION,accepted_terms:true,accepted_privacy:true,accepted_risk:true,age_confirmed:true,legal_accepted_at:new Date().toISOString(),legal_evidence_hash:evidence } }), cache: 'no-store' })
     const result = await authResponse.json()
     if (!authResponse.ok) return NextResponse.json({ error: result.msg || result.error_description || 'Unable to create account.' }, { status: authResponse.status })
     if (!result.access_token) return NextResponse.json({ ok: true, confirmationRequired: true })
