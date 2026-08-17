@@ -1,0 +1,3 @@
+import { NextRequest,NextResponse } from 'next/server'
+import { getAuthenticatedUser,postOwnData } from '../../../../../../lib/supabase-rest'
+export async function POST(request:NextRequest,{params}:{params:{id:string}}){const auth=await getAuthenticatedUser();if(!auth)return NextResponse.json({error:'Unauthorized'},{status:401});try{const body=await request.json();const id=await postOwnData<string>('rpc/add_support_message',auth.accessToken,{p_ticket_id:params.id,p_message:body.message});return NextResponse.json({ok:true,id})}catch(error){return NextResponse.json({error:error instanceof Error?error.message:'Unable to add reply'},{status:400})}}

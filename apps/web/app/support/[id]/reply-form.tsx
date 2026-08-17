@@ -1,0 +1,4 @@
+'use client'
+import { FormEvent,useState } from 'react'
+import { useRouter } from 'next/navigation'
+export default function ReplyForm({id}:{id:string}){const router=useRouter(),[busy,setBusy]=useState(false),[error,setError]=useState('');async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();const form=e.currentTarget,message=new FormData(form).get('message');setBusy(true);setError('');const response=await fetch(`/api/support/${id}/messages`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message})}),result=await response.json().catch(()=>({}));setBusy(false);if(!response.ok){setError(result.error||'Reply failed');return}form.reset();router.refresh()}return <form onSubmit={submit}><textarea name="message" minLength={3} maxLength={5000} rows={5} required/><button disabled={busy}>{busy?'Sending…':'Send reply →'}</button>{error&&<p>{error}</p>}</form>}
