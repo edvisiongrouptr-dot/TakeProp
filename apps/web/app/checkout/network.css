@@ -1,0 +1,3 @@
+.networkTabs{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;margin:12px 0}
+.networkTabs button{border:1px solid #57491f;background:#14130c;color:#9b8a58;padding:9px 4px;cursor:pointer;font-size:10px}
+.networkTabs button.on{background:#4c401a;color:#ffe58a;border-color:#a78b36}

@@ -29,3 +29,16 @@ export async function getOwnData<T>(path: string, accessToken: string): Promise<
   if (!response.ok) throw new Error(`Supabase query failed (${response.status}).`)
   return response.json() as Promise<T>
 }
+
+export async function postOwnData<T>(path: string, accessToken: string, body: unknown): Promise<T> {
+  const { url, key } = supabaseConfig()
+  const response = await fetch(`${url}/rest/v1/${path}`, {
+    method: 'POST',
+    headers: { apikey: key, Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json', Prefer: 'return=representation' },
+    body: JSON.stringify(body),
+    cache: 'no-store'
+  })
+  const result = await response.json().catch(() => null)
+  if (!response.ok) throw new Error(result?.message || `Supabase mutation failed (${response.status}).`)
+  return result as T
+}
