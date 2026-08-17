@@ -1,0 +1,5 @@
+'use client'
+import { useState } from 'react'
+import { useRouter } from 'next/navigation'
+import styles from './admin.module.css'
+export default function PaymentActions({orderId}:{orderId:string}){const router=useRouter(),[busy,setBusy]=useState(false),[error,setError]=useState('');async function review(decision:'approve'|'reject'){const msg=decision==='approve'?'Did you verify network, address, amount and transaction status on-chain?':'Reject this payment submission?';if(!confirm(msg))return;setBusy(true);setError('');const r=await fetch(`/api/admin/orders/${orderId}/review`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({decision})});const x=await r.json().catch(()=>({}));if(!r.ok){setError(x.error||'Review failed.');setBusy(false);return}router.refresh()}return <div className={styles.actions}><button disabled={busy} onClick={()=>review('approve')}>Approve & issue account</button><button disabled={busy} onClick={()=>review('reject')}>Reject</button>{error&&<p>{error}</p>}</div>}
