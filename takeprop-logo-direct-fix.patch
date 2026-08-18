@@ -1,0 +1,153 @@
+diff --git a/apps/web/app/auth/page.tsx b/apps/web/app/auth/page.tsx
+index 5bb63cf..f274920 100644
+--- a/apps/web/app/auth/page.tsx
++++ b/apps/web/app/auth/page.tsx
+@@ -2,11 +2,12 @@
+ 
+ import Link from 'next/link'
+ import { FormEvent, useState } from 'react'
++import BrandLogo from '../brand-logo'
+ import './auth.css'
+ import './legal-checks.css'
+ 
+ export default function AuthPage(){
+  const[mode,setMode]=useState<'login'|'register'>('login'),[message,setMessage]=useState(''),[loading,setLoading]=useState(false)
+  async function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();setLoading(true);setMessage('');const form=new FormData(event.currentTarget),response=await fetch(`/api/auth/${mode}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({fullName:form.get('fullName'),email:form.get('email'),password:form.get('password'),acceptedTerms:form.get('acceptedTerms')==='on',acceptedPrivacy:form.get('acceptedPrivacy')==='on',acceptedRisk:form.get('acceptedRisk')==='on',ageConfirmed:form.get('ageConfirmed')==='on'})}),result=await response.json();setLoading(false);if(!response.ok)return setMessage(result.error||'Something went wrong.');if(result.confirmationRequired)return setMessage('Check your email to confirm your account, then sign in.');window.location.href='/dashboard'}
+- return <main className="authPage"><section className="authIntro"><Link className="brand" href="/"><b>TP</b><strong>TakeProp</strong></Link><div><span>SIMULATED TRADING · SECURE ACCESS</span><h1>Your trading journey starts here.</h1><p>Create your account, choose a challenge and track every rule from one transparent dashboard.</p></div><small>Protected by encrypted, HTTP-only session cookies.</small></section><section className="authPanel"><div className="authBox"><span>TRADER ACCESS</span><h2>{mode==='login'?'Welcome back.':'Create your account.'}</h2><p>{mode==='login'?'Sign in to your TakeProp dashboard.':'One account for challenges, trading and payouts.'}</p><div className="authTabs"><button type="button" className={mode==='login'?'on':''} onClick={()=>{setMode('login');setMessage('')}}>Log in</button><button type="button" className={mode==='register'?'on':''} onClick={()=>{setMode('register');setMessage('')}}>Register</button></div><form onSubmit={submit}>{mode==='register'&&<label>FULL NAME<input name="fullName" autoComplete="name" minLength={2} required placeholder="Your full name"/></label>}<label>EMAIL<input name="email" type="email" autoComplete="email" required placeholder="you@example.com"/></label><label>PASSWORD<input name="password" type="password" autoComplete={mode==='login'?'current-password':'new-password'} minLength={8} required placeholder="At least 8 characters"/></label>{mode==='register'&&<div className="legalChecks"><label><input type="checkbox" name="ageConfirmed" required/>I confirm that I am at least 18 and eligible to use the service.</label><label><input type="checkbox" name="acceptedTerms" required/>I accept the <Link href="/terms" target="_blank">Terms of Use</Link>.</label><label><input type="checkbox" name="acceptedPrivacy" required/>I acknowledge the <Link href="/privacy" target="_blank">Privacy Notice</Link>.</label><label><input type="checkbox" name="acceptedRisk" required/>I have read the <Link href="/risk-disclosure" target="_blank">Risk Disclosure</Link>.</label></div>}{message&&<div className="authMessage">{message}</div>}<button className="btn authSubmit" disabled={loading}>{loading?'Please wait…':mode==='login'?'Log in →':'Create account →'}</button></form>{mode==='login'&&<Link className="forgot" href="/forgot-password">Forgot your password?</Link>}</div></section></main>
++ return <main className="authPage"><section className="authIntro"><BrandLogo priority/><div><span>SIMULATED TRADING · SECURE ACCESS</span><h1>Your trading journey starts here.</h1><p>Create your account, choose a challenge and track every rule from one transparent dashboard.</p></div><small>Protected by encrypted, HTTP-only session cookies.</small></section><section className="authPanel"><div className="authBox"><span>TRADER ACCESS</span><h2>{mode==='login'?'Welcome back.':'Create your account.'}</h2><p>{mode==='login'?'Sign in to your TakeProp dashboard.':'One account for challenges, trading and payouts.'}</p><div className="authTabs"><button type="button" className={mode==='login'?'on':''} onClick={()=>{setMode('login');setMessage('')}}>Log in</button><button type="button" className={mode==='register'?'on':''} onClick={()=>{setMode('register');setMessage('')}}>Register</button></div><form onSubmit={submit}>{mode==='register'&&<label>FULL NAME<input name="fullName" autoComplete="name" minLength={2} required placeholder="Your full name"/></label>}<label>EMAIL<input name="email" type="email" autoComplete="email" required placeholder="you@example.com"/></label><label>PASSWORD<input name="password" type="password" autoComplete={mode==='login'?'current-password':'new-password'} minLength={8} required placeholder="At least 8 characters"/></label>{mode==='register'&&<div className="legalChecks"><label><input type="checkbox" name="ageConfirmed" required/>I confirm that I am at least 18 and eligible to use the service.</label><label><input type="checkbox" name="acceptedTerms" required/>I accept the <Link href="/terms" target="_blank">Terms of Use</Link>.</label><label><input type="checkbox" name="acceptedPrivacy" required/>I acknowledge the <Link href="/privacy" target="_blank">Privacy Notice</Link>.</label><label><input type="checkbox" name="acceptedRisk" required/>I have read the <Link href="/risk-disclosure" target="_blank">Risk Disclosure</Link>.</label></div>}{message&&<div className="authMessage">{message}</div>}<button className="btn authSubmit" disabled={loading}>{loading?'Please wait…':mode==='login'?'Log in →':'Create account →'}</button></form>{mode==='login'&&<Link className="forgot" href="/forgot-password">Forgot your password?</Link>}</div></section></main>
+ }
+diff --git a/apps/web/app/brand-logo.tsx b/apps/web/app/brand-logo.tsx
+new file mode 100644
+index 0000000..ece145a
+--- /dev/null
++++ b/apps/web/app/brand-logo.tsx
+@@ -0,0 +1,8 @@
++import Image from 'next/image'
++import Link from 'next/link'
++
++export default function BrandLogo({href='/',priority=false}:{href?:string;priority?:boolean}){
++ return <Link className="brand" href={href} aria-label="TakeProp home">
++  <Image src="/brand/takeprop-logo.png" alt="TakeProp" width={920} height={256} priority={priority} sizes="(max-width: 640px) 145px, 190px"/>
++ </Link>
++}
+diff --git a/apps/web/app/brand.css b/apps/web/app/brand.css
+index 5307aa5..0059002 100644
+--- a/apps/web/app/brand.css
++++ b/apps/web/app/brand.css
+@@ -1,3 +1,3 @@
+-.brand{display:inline-block!important;width:190px!important;height:58px!important;min-width:190px;background:url('/brand/takeprop-logo.png') left center/contain no-repeat!important;line-height:0!important}
+-.brand>b,.brand>strong{visibility:hidden!important}
+-@media(max-width:640px){.brand{width:145px!important;height:46px!important;min-width:145px}}
++.brand{display:inline-flex!important;width:190px!important;height:58px!important;min-width:190px;align-items:center!important;line-height:0!important}
++.brand img{display:block;width:190px!important;height:auto!important;object-fit:contain}
++@media(max-width:640px){.brand{width:145px!important;height:46px!important;min-width:145px}.brand img{width:145px!important}}
+diff --git a/apps/web/app/checkout/page.tsx b/apps/web/app/checkout/page.tsx
+index 0d255da..3ca2c4a 100644
+--- a/apps/web/app/checkout/page.tsx
++++ b/apps/web/app/checkout/page.tsx
+@@ -2,6 +2,7 @@ import Link from 'next/link'
+ import { redirect } from 'next/navigation'
+ import { getAuthenticatedUser, getOwnData } from '../../lib/supabase-rest'
+ import CheckoutForm from './checkout-form'
++import BrandLogo from '../brand-logo'
+ import './checkout.css'
+ import './network.css'
+ 
+@@ -14,5 +15,5 @@ export default async function Checkout({ searchParams }: { searchParams: { plan?
+   const plans = await getOwnData<Plan[]>(`challenge_plans?select=id,slug,name,account_size,price,profit_target_pct,daily_loss_limit_pct,max_loss_limit_pct,profit_split_pct,rules&slug=eq.${encodeURIComponent(slug)}&is_active=eq.true&limit=1`, auth.accessToken)
+   const plan = plans[0]; if (!plan) redirect('/#plans')
+   const twoStep = plan.rules?.challenge_type === 'two_step'
+-  return <main className="checkoutPage"><header><Link className="brand" href="/"><b>TP</b><strong>TakeProp</strong></Link><Link href="/#plans">← Change plan</Link></header><section><div className="checkoutIntro"><span>SECURE CHECKOUT</span><h1>Start your {twoStep ? 'Two-Step' : 'One-Step'} challenge.</h1><p>Review the fixed rules, pay with USDT on BEP20 and submit the blockchain transaction for verification.</p><div className="orderCard"><small>SELECTED CHALLENGE</small><h2>{usd(plan.account_size)}</h2><p>{plan.name}</p><div><span>Profit target<b>{twoStep ? `${plan.profit_target_pct}% / ${plan.rules.phase_2_profit_target_pct || 5}%` : `${plan.profit_target_pct}%`}</b></span><span>Daily loss<b>{plan.daily_loss_limit_pct}%</b></span><span>Static max loss<b>{plan.max_loss_limit_pct}%</b></span><span>Reward split<b>{plan.profit_split_pct}%</b></span></div><strong>{plan.price} USDT</strong></div></div><CheckoutForm planId={plan.id}/></section></main>
++  return <main className="checkoutPage"><header><BrandLogo priority/><Link href="/#plans">← Change plan</Link></header><section><div className="checkoutIntro"><span>SECURE CHECKOUT</span><h1>Start your {twoStep ? 'Two-Step' : 'One-Step'} challenge.</h1><p>Review the fixed rules, pay with USDT on BEP20 and submit the blockchain transaction for verification.</p><div className="orderCard"><small>SELECTED CHALLENGE</small><h2>{usd(plan.account_size)}</h2><p>{plan.name}</p><div><span>Profit target<b>{twoStep ? `${plan.profit_target_pct}% / ${plan.rules.phase_2_profit_target_pct || 5}%` : `${plan.profit_target_pct}%`}</b></span><span>Daily loss<b>{plan.daily_loss_limit_pct}%</b></span><span>Static max loss<b>{plan.max_loss_limit_pct}%</b></span><span>Reward split<b>{plan.profit_split_pct}%</b></span></div><strong>{plan.price} USDT</strong></div></div><CheckoutForm planId={plan.id}/></section></main>
+ }
+diff --git a/apps/web/app/dashboard/page.tsx b/apps/web/app/dashboard/page.tsx
+index bae75c6..9c78e11 100644
+--- a/apps/web/app/dashboard/page.tsx
++++ b/apps/web/app/dashboard/page.tsx
+@@ -2,6 +2,7 @@ import Link from 'next/link'
+ import { redirect } from 'next/navigation'
+ import { getAuthenticatedUser, getOwnData } from '../../lib/supabase-rest'
+ import LogoutButton from './logout-button'
++import BrandLogo from '../brand-logo'
+ 
+ type Profile={full_name:string|null;kyc_status:string}
+ type Plan={name:string;profit_target_pct:number;daily_loss_limit_pct:number;max_loss_limit_pct:number;min_trading_days:number}
+@@ -20,5 +21,5 @@ export default async function Dashboard(){
+  const plan=account.challenge_plans,targetPct=account.phase==='funded'?0:Number(account.evaluation_target_pct??plan?.profit_target_pct??0),target=account.starting_balance*targetPct/100,progress=target?Math.max(0,Math.min(100,account.total_pnl/target*100)):100,dailyFloor=account.starting_balance*(1-Number(plan?.daily_loss_limit_pct||0)/100),maxFloor=account.starting_balance*(1-Number(plan?.max_loss_limit_pct||0)/100),daysRequired=Number(plan?.min_trading_days||0)
+  return <main className="dash"><Aside/><section><header><div><small>TRADER DASHBOARD</small><h1>Welcome back, {name}.</h1></div><div className="headActions"><button>{account.display_account_id||'TAKEPROP ACCOUNT'}</button><LogoutButton/></div></header><div className="dashCards"><Card l="Balance" v={usd(account.balance)}/><Card l="Equity" v={usd(account.equity)} g/><Card l="Today’s P&L" v={usd(account.daily_pnl)} g={account.daily_pnl>=0}/><Card l="Account status" v={account.status.toUpperCase()} g={account.status==='active'}/></div><div className="stageBanner"><b>{account.phase==='funded'?'FUNDED SIMULATED ACCOUNT':`EVALUATION STEP ${account.evaluation_step} OF ${account.evaluation_steps}`}</b><span>{account.status==='passed'?'Completed — the next account is ready':account.status==='breached'?'Failed — a loss limit was breached':account.phase==='funded'?'Eligible profit is subject to payout and KYC rules':'Meet both the profit target and minimum trading-day rule'}</span></div><div className="dashGrid"><article><header><b>{account.phase==='funded'?'Performance':'Challenge progress'}</b><small>{plan?.name||account.phase.toUpperCase()}</small></header><div className="bigProgress"><b>{usd(account.total_pnl)}</b>{account.phase!=='funded'&&<span> of {usd(target)} target ({targetPct}%)</span>}<i><b style={{width:`${progress}%`}}/></i><strong>{account.phase==='funded'?'Funded performance':`${progress.toFixed(1)}% complete`}</strong></div><div className="riskRows"><div><span>Trading days</span><b>{account.trading_days} / {daysRequired}</b><small>Completed / required</small></div><div><span>Static loss floor</span><b>{usd(maxFloor)}</b><small>{plan?.max_loss_limit_pct||0}% static limit</small></div></div></article><article><header><b>Account</b><small>SIMULATED</small></header><div className="accountInfo"><span>Starting balance<b>{usd(account.starting_balance)}</b></span><span>Phase<b>{account.phase.toUpperCase()}</b></span><span>Daily loss floor<b>{usd(dailyFloor)}</b></span><span>KYC status<b>{(profile?.kyc_status||'not_started').replace('_',' ').toUpperCase()}</b></span></div>{account.status==='active'?<Link className="btn" href="/terminal">Open terminal →</Link>:<Link className="btn" href="/support">Contact support →</Link>}</article></div><div className="disclaimer">All trading activity shown is simulated. Mark price is used for unrealized P&amp;L and risk.</div></section></main>
+ }
+-function Aside(){return <aside><Link className="brand" href="/"><b>TP</b><strong>TakeProp</strong></Link><nav><a className="active">Overview</a><Link href="/terminal">Trade</Link><Link href="/terminal">Orders &amp; positions</Link><Link href="/payouts">Payouts</Link><Link href="/kyc">Identity verification</Link><Link href="/notifications">Notifications</Link><Link href="/support">Support</Link></nav><small>SIMULATED ENVIRONMENT</small></aside>}
++function Aside(){return <aside><BrandLogo priority/><nav><a className="active">Overview</a><Link href="/terminal">Trade</Link><Link href="/terminal">Orders &amp; positions</Link><Link href="/payouts">Payouts</Link><Link href="/kyc">Identity verification</Link><Link href="/notifications">Notifications</Link><Link href="/support">Support</Link></nav><small>SIMULATED ENVIRONMENT</small></aside>}
+ function Card({l,v,g}:{l:string,v:string,g?:boolean}){return <article><small>{l}</small><b className={g?'green':''}>{v}</b></article>}
+diff --git a/apps/web/app/forgot-password/page.tsx b/apps/web/app/forgot-password/page.tsx
+index c8bc862..33db703 100644
+--- a/apps/web/app/forgot-password/page.tsx
++++ b/apps/web/app/forgot-password/page.tsx
+@@ -1,10 +1,11 @@
+ 'use client'
+ import Link from 'next/link'
+ import {FormEvent,useState} from 'react'
++import BrandLogo from '../brand-logo'
+ import '../auth/auth.css'
+ 
+ export default function ForgotPassword(){
+  const [message,setMessage]=useState(''),[loading,setLoading]=useState(false)
+  async function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();setLoading(true);const email=new FormData(event.currentTarget).get('email');const response=await fetch('/api/auth/recover',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email})});const result=await response.json();setLoading(false);setMessage(result.message||result.error||'Unable to continue.')}
+- return <main className="authPage"><section className="authIntro"><Link className="brand" href="/"><b>TP</b><strong>TakeProp</strong></Link><div><span>ACCOUNT SECURITY</span><h1>Recover access.</h1><p>We will send a time-limited password reset link to your registered email address.</p></div></section><section className="authPanel"><div className="authBox"><span>SECURE RECOVERY</span><h2>Forgot your password?</h2><p>Enter the email used for your TakeProp account.</p><form onSubmit={submit}><label>EMAIL<input name="email" type="email" autoComplete="email" required placeholder="you@example.com"/></label>{message&&<div className="authMessage">{message}</div>}<button className="btn authSubmit" disabled={loading}>{loading?'Please wait…':'Send recovery link →'}</button></form><Link href="/auth">← Back to sign in</Link></div></section></main>
++ return <main className="authPage"><section className="authIntro"><BrandLogo priority/><div><span>ACCOUNT SECURITY</span><h1>Recover access.</h1><p>We will send a time-limited password reset link to your registered email address.</p></div></section><section className="authPanel"><div className="authBox"><span>SECURE RECOVERY</span><h2>Forgot your password?</h2><p>Enter the email used for your TakeProp account.</p><form onSubmit={submit}><label>EMAIL<input name="email" type="email" autoComplete="email" required placeholder="you@example.com"/></label>{message&&<div className="authMessage">{message}</div>}<button className="btn authSubmit" disabled={loading}>{loading?'Please wait…':'Send recovery link →'}</button></form><Link href="/auth">← Back to sign in</Link></div></section></main>
+ }
+diff --git a/apps/web/app/legal-layout.tsx b/apps/web/app/legal-layout.tsx
+index 951678d..0877135 100644
+--- a/apps/web/app/legal-layout.tsx
++++ b/apps/web/app/legal-layout.tsx
+@@ -1,4 +1,5 @@
+ import Link from 'next/link'
+ import {ReactNode} from 'react'
+ import styles from './legal.module.css'
+-export default function LegalLayout({title,children}:{title:string;children:ReactNode}){return <main className={styles.page}><div className={styles.wrap}><header className={styles.top}><Link className="brand" href="/"><b>TP</b><strong>TakeProp</strong></Link><Link href="/support">Support</Link></header><small>LEGAL · SIMULATED TRADING</small><h1>{title}</h1><p className={styles.meta}>Effective 17 August 2026 · Last updated 17 August 2026</p><div className={styles.notice}>TakeProp provides simulated trading evaluations. It is not a broker, exchange, custodian, investment adviser or deposit-taking institution. No user order is placed on a live market.</div>{children}<nav><Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link><Link href="/risk-disclosure">Risk disclosure</Link><Link href="/refund-policy">Refund policy</Link><Link href="/aml-kyc">AML/KYC</Link></nav><footer><p>Questions: <a href="mailto:support@takeprop.com">support@takeprop.com</a></p></footer></div></main>}
++import BrandLogo from './brand-logo'
++export default function LegalLayout({title,children}:{title:string;children:ReactNode}){return <main className={styles.page}><div className={styles.wrap}><header className={styles.top}><BrandLogo priority/><Link href="/support">Support</Link></header><small>LEGAL · SIMULATED TRADING</small><h1>{title}</h1><p className={styles.meta}>Effective 17 August 2026 · Last updated 17 August 2026</p><div className={styles.notice}>TakeProp provides simulated trading evaluations. It is not a broker, exchange, custodian, investment adviser or deposit-taking institution. No user order is placed on a live market.</div>{children}<nav><Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link><Link href="/risk-disclosure">Risk disclosure</Link><Link href="/refund-policy">Refund policy</Link><Link href="/aml-kyc">AML/KYC</Link></nav><footer><p>Questions: <a href="mailto:support@takeprop.com">support@takeprop.com</a></p></footer></div></main>}
+diff --git a/apps/web/app/page.tsx b/apps/web/app/page.tsx
+index 2ff99fa..a389d75 100644
+--- a/apps/web/app/page.tsx
++++ b/apps/web/app/page.tsx
+@@ -1,10 +1,11 @@
+ 'use client'
+ import {useMemo,useState} from 'react'
+ import {money,plans,StepType} from '../lib/plans'
++import BrandLogo from './brand-logo'
+ const sizes=[5000,10000,25000,50000,100000]
+ export default function Home(){const[step,setStep]=useState<StepType>('ONE_STEP');const[size,setSize]=useState(5000);const plan=useMemo(()=>plans.find(p=>p.balance===size&&p.stepType===step)!,[size,step]);return <main>
+  <div className="notice">SIMULATED TRADING <i/> UP TO 90% PERFORMANCE REWARDS <i/> STATIC DRAWDOWN</div>
+- <header className="nav shell"><a className="brand" href="#top"><b>TP</b><strong>TakeProp</strong></a><nav><a href="#how">How it works</a><a href="#plans">Challenges</a><a href="#rules">Rules</a><a href="#faq">FAQ</a></nav><div><a href="/auth">Log in</a><a className="btn small" href="#plans">Get funded</a></div></header>
++ <header className="nav shell"><BrandLogo href="#top"/><nav><a href="#how">How it works</a><a href="#plans">Challenges</a><a href="#rules">Rules</a><a href="#faq">FAQ</a></nav><div><a href="/auth">Log in</a><a className="btn small" href="#plans">Get funded</a></div></header>
+  <section className="hero shell" id="top"><div><span className="eyebrow">● BUILT FOR DISCIPLINED CRYPTO TRADERS</span><h1>Your edge.<br/><em>Our capital.</em></h1><p>Prove your strategy in a transparent simulated evaluation. Keep up to 90% of your performance rewards—with no hidden rules, moving drawdown, or time pressure.</p><div className="actions"><a className="btn" href="#plans">Start from $29 →</a><a href="#how">See how it works</a></div><small>✓ No time limit　 ✓ Static 6–8% max loss　 ✓ 80–90% reward split</small></div><Terminal/></section>
+  <section className="metrics"><div className="shell"><Metric a="UP TO 90%" b="REWARD SPLIT"/><Metric a="10×" b="MAX LEVERAGE"/><Metric a="0" b="MINIMUM DAYS"/><Metric a="24/7" b="CRYPTO MARKETS"/></div></section>
+  <section className="section shell" id="how"><Title over="THE PROCESS" title={<>Three steps to <em>funded.</em></>}/><div className="grid three"><Card n="01" title="Choose your challenge">Select an account size and one-step or two-step evaluation.</Card><Card n="02" title="Prove your edge">Reach the target within fixed, transparent risk limits.</Card><Card n="03" title="Get funded">Complete review and unlock a fresh simulated funded account.</Card></div></section>
+@@ -12,7 +13,7 @@ export default function Home(){const[step,setStep]=useState<StepType>('ONE_STEP'
+  <section className="section shell" id="rules"><Title over="RULES THAT DON'T MOVE" title={<>Built on <em>clarity.</em></>}/><div className="grid four"><Card n="◇" title="3% daily loss">Based on balance at 00:00 UTC. Stale prices never create a breach.</Card><Card n="▱" title="6–8% static max loss">The floor is 94% for 1-Step and 92% for 2-Step and never trails profits.</Card><Card n="◎" title="No time pressure">No deadline and no minimum trading days.</Card><Card n="◈" title="Provable breaches">Every decision stores equity, floor, UTC time and mark-price evidence.</Card></div></section>
+  <section className="cta shell"><span>READY TO PROVE YOUR EDGE?</span><h2>Trade with rules you can trust.</h2><p>Choose your challenge and start from $29.</p><a className="btn" href="#plans">View challenge plans →</a></section>
+  <section className="section shell faq" id="faq"><Title over="FAQ" title={<>Straight answers.</>}/>{[['Is this real-money trading?','No. All TakeProp accounts and execution are simulated.'],['Does drawdown trail profits?','No. The maximum-loss floor is static at 94% for 1-Step and 92% for 2-Step.'],['How does 2-Step work?','Reach 8% in Phase 1 and 8% in a fresh Phase 2 account.'],['How much do traders keep?','Eligible funded traders receive 80% on 1-Step and 90% on 2-Step.']].map(([q,a])=><details key={q}><summary>{q}<b>+</b></summary><p>{a}</p></details>)}</section>
+- <footer><div className="shell foot"><div><a className="brand" href="#top"><b>TP</b><strong>TakeProp</strong></a><p>Trade Crypto. Prove Your Edge. Get Funded.</p></div><div><strong>Product</strong><a href="#plans">Challenges</a><a href="#rules">Rules</a></div><div><strong>Company</strong><a href="#faq">FAQ</a><a href="mailto:support@takeprop.com">Support</a></div><div><strong>Legal</strong><a href="/terms">Terms</a><a href="/privacy">Privacy</a></div></div><div className="shell legal">© 2026 TakeProp. Simulated evaluations only. Nothing on this site is investment advice or brokerage services.</div></footer>
++ <footer><div className="shell foot"><div><BrandLogo href="#top"/><p>Trade Crypto. Prove Your Edge. Get Funded.</p></div><div><strong>Product</strong><a href="#plans">Challenges</a><a href="#rules">Rules</a></div><div><strong>Company</strong><a href="#faq">FAQ</a><a href="mailto:support@takeprop.com">Support</a></div><div><strong>Legal</strong><a href="/terms">Terms</a><a href="/privacy">Privacy</a></div></div><div className="shell legal">© 2026 TakeProp. Simulated evaluations only. Nothing on this site is investment advice or brokerage services.</div></footer>
+  </main>}
+ function Title({over,title}:{over:string,title:React.ReactNode}){return <div className="title"><span>{over}</span><h2>{title}</h2></div>}
+ function Metric({a,b}:{a:string,b:string}){return <div><b>{a}</b><span>{b}</span></div>}
+diff --git a/apps/web/app/reset-password/page.tsx b/apps/web/app/reset-password/page.tsx
+index 39ee0c3..7f2149c 100644
+--- a/apps/web/app/reset-password/page.tsx
++++ b/apps/web/app/reset-password/page.tsx
+@@ -1,11 +1,12 @@
+ 'use client'
+ import Link from 'next/link'
+ import {FormEvent,useEffect,useState} from 'react'
++import BrandLogo from '../brand-logo'
+ import '../auth/auth.css'
+ 
+ export default function ResetPassword(){
+  const [token,setToken]=useState(''),[message,setMessage]=useState(''),[loading,setLoading]=useState(false),[done,setDone]=useState(false)
+  useEffect(()=>{const hash=new URLSearchParams(window.location.hash.slice(1));setToken(hash.get('access_token')||'');if(hash.get('error_description'))setMessage(decodeURIComponent(hash.get('error_description')||''))},[])
+  async function submit(event:FormEvent<HTMLFormElement>){event.preventDefault();setLoading(true);const form=new FormData(event.currentTarget),password=String(form.get('password')||''),confirm=String(form.get('confirm')||'');if(password!==confirm){setLoading(false);return setMessage('Passwords do not match.')}const response=await fetch('/api/auth/reset',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({accessToken:token,password})});const result=await response.json();setLoading(false);if(!response.ok)return setMessage(result.error||'Unable to reset the password.');setDone(true);setMessage('Your password has been updated. You can now sign in.')}
+- return <main className="authPage"><section className="authIntro"><Link className="brand" href="/"><b>TP</b><strong>TakeProp</strong></Link><div><span>ACCOUNT SECURITY</span><h1>Choose a new password.</h1><p>Use a unique password that you do not use on another service.</p></div></section><section className="authPanel"><div className="authBox"><span>SECURE RECOVERY</span><h2>Reset password.</h2>{done?<><div className="authMessage">{message}</div><Link className="btn authSubmit" href="/auth">Sign in →</Link></>:<form onSubmit={submit}><label>NEW PASSWORD<input name="password" type="password" autoComplete="new-password" minLength={8} required/></label><label>CONFIRM PASSWORD<input name="confirm" type="password" autoComplete="new-password" minLength={8} required/></label>{message&&<div className="authMessage">{message}</div>}<button className="btn authSubmit" disabled={loading||!token}>{loading?'Please wait…':'Update password →'}</button></form>}</div></section></main>
++ return <main className="authPage"><section className="authIntro"><BrandLogo priority/><div><span>ACCOUNT SECURITY</span><h1>Choose a new password.</h1><p>Use a unique password that you do not use on another service.</p></div></section><section className="authPanel"><div className="authBox"><span>SECURE RECOVERY</span><h2>Reset password.</h2>{done?<><div className="authMessage">{message}</div><Link className="btn authSubmit" href="/auth">Sign in →</Link></>:<form onSubmit={submit}><label>NEW PASSWORD<input name="password" type="password" autoComplete="new-password" minLength={8} required/></label><label>CONFIRM PASSWORD<input name="confirm" type="password" autoComplete="new-password" minLength={8} required/></label>{message&&<div className="authMessage">{message}</div>}<button className="btn authSubmit" disabled={loading||!token}>{loading?'Please wait…':'Update password →'}</button></form>}</div></section></main>
+ }
