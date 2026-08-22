@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import { createHash } from 'node:crypto'
 import { authCookies, supabaseConfig } from '../../../../lib/supabase-rest'
+import {passwordPolicyError} from '../../../../lib/password-policy'
 
 const LEGAL_VERSION = '2026-08-17'
 
@@ -9,7 +10,7 @@ export async function POST(request: Request) {
     const { fullName, email, password, acceptedTerms, acceptedPrivacy, acceptedRisk, ageConfirmed } = await request.json()
     if (typeof fullName !== 'string' || fullName.trim().length < 2) return NextResponse.json({ error: 'Enter your full name.' }, { status: 400 })
     if (typeof email !== 'string' || !email.includes('@')) return NextResponse.json({ error: 'Enter a valid email.' }, { status: 400 })
-    if (typeof password !== 'string' || password.length < 8) return NextResponse.json({ error: 'Password must contain at least 8 characters.' }, { status: 400 })
+    const passwordError=passwordPolicyError(password);if(passwordError)return NextResponse.json({error:passwordError},{status:400})
     if (!acceptedTerms || !acceptedPrivacy || !acceptedRisk || !ageConfirmed) return NextResponse.json({ error: 'Confirm your eligibility and accept all required legal documents.' }, { status: 400 })
     const { url, key } = supabaseConfig(); const origin = new URL(request.url).origin
     const evidence=createHash('sha256').update([request.headers.get('x-forwarded-for')?.split(',')[0]?.trim()||'unknown',request.headers.get('user-agent')||'unknown',process.env.LEGAL_ACCEPTANCE_SALT||'takeprop'].join('|')).digest('hex')

@@ -1,5 +1,6 @@
 const symbols=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT'] as const
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}})
+function constantTimeEqual(left:string,right:string){if(left.length!==right.length)return false;let difference=0;for(let i=0;i<left.length;i++)difference|=left.charCodeAt(i)^right.charCodeAt(i);return difference===0}
 function secret(name:string,fallback:string){const direct=Deno.env.get(name);if(direct)return direct;const raw=Deno.env.get(fallback)||'';try{const parsed=JSON.parse(raw);return String(parsed.default||Object.values(parsed)[0]||'')}catch{return raw}}
 async function fetchJson(url:string){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),4500);try{const response=await fetch(url,{signal:controller.signal,headers:{'user-agent':'TakeProp-Order-Worker/1.0'}});if(!response.ok)throw new Error(`HTTP ${response.status}`);return await response.json()}finally{clearTimeout(timer)}}
 async function prices(){
@@ -13,8 +14,8 @@ async function prices(){
 Deno.serve(async request=>{
  const startedAt=new Date().toISOString()
  if(request.method!=='POST')return json({error:'Method not allowed'},405)
- const expected=Deno.env.get('ORDER_WORKER_SECRET')||''
- if(!expected||request.headers.get('authorization')!==`Bearer ${expected}`)return json({error:'Unauthorized'},401)
+ const expected=Deno.env.get('ORDER_WORKER_SECRET')||'',provided=request.headers.get('authorization')?.replace(/^Bearer\s+/,'')||''
+ if(!expected||!constantTimeEqual(provided,expected))return json({error:'Unauthorized'},401)
  const url=Deno.env.get('SUPABASE_URL')||'',serviceKey=secret('SUPABASE_SERVICE_ROLE_KEY','SUPABASE_SECRET_KEYS')
  if(!url||!serviceKey)return json({error:'Worker is not configured'},503)
  try{

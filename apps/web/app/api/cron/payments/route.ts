@@ -1,7 +1,8 @@
 import {NextRequest,NextResponse} from 'next/server'
+import {bearerMatches} from '../../../../lib/server-secret'
 export const dynamic='force-dynamic'
 export async function GET(request:NextRequest){
- if(!process.env.CRON_SECRET||request.headers.get('authorization')!==`Bearer ${process.env.CRON_SECRET}`)return NextResponse.json({error:'Unauthorized'},{status:401})
+ if(!bearerMatches(request.headers.get('authorization'),process.env.CRON_SECRET))return NextResponse.json({error:'Unauthorized'},{status:401})
  const url=process.env.NEXT_PUBLIC_SUPABASE_URL?.replace(/\/$/,'')
  const key=process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY||process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
  const secret=process.env.PAYMENT_WORKER_SECRET

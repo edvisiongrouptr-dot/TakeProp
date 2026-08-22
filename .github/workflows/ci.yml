@@ -15,8 +15,8 @@ jobs:
         with:
           node-version: 20
           cache: pnpm
-      - run: pnpm install --no-frozen-lockfile
-      - run: pnpm verify:release
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm verify:all
       - run: pnpm --filter web build
         env:
           NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co

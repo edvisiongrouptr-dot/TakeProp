@@ -1,11 +1,12 @@
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}})
+function constantTimeEqual(left:string,right:string){if(left.length!==right.length)return false;let difference=0;for(let i=0;i<left.length;i++)difference|=left.charCodeAt(i)^right.charCodeAt(i);return difference===0}
 function secret(name:string,fallback:string){const direct=Deno.env.get(name);if(direct)return direct;const raw=Deno.env.get(fallback)||'';try{const parsed=JSON.parse(raw);return String(parsed.default||Object.values(parsed)[0]||'')}catch{return raw}}
 const minimums:Record<string,number>={usdt_bep20:12,usdt_erc20:20,usdt_trc20:20,usdt_ton:10}
 Deno.serve(async request=>{
  const startedAt=new Date().toISOString()
  if(request.method!=='POST')return json({error:'Method not allowed'},405)
- const workerSecret=Deno.env.get('PAYMENT_WORKER_SECRET')||''
- if(!workerSecret||request.headers.get('authorization')!==`Bearer ${workerSecret}`)return json({error:'Unauthorized'},401)
+ const workerSecret=Deno.env.get('PAYMENT_WORKER_SECRET')||'',provided=request.headers.get('authorization')?.replace(/^Bearer\s+/,'')||''
+ if(!workerSecret||!constantTimeEqual(provided,workerSecret))return json({error:'Unauthorized'},401)
  const url=Deno.env.get('SUPABASE_URL')||'',serviceKey=secret('SUPABASE_SERVICE_ROLE_KEY','SUPABASE_SECRET_KEYS')
  const verifierUrl=Deno.env.get('PAYMENT_VERIFICATION_API_URL')||'',verifierToken=Deno.env.get('PAYMENT_VERIFICATION_API_TOKEN')||''
  if(!url||!serviceKey||!verifierUrl||!verifierToken)return json({error:'Payment verification is not configured'},503)

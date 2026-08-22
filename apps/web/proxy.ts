@@ -8,6 +8,13 @@ function requestKey(request:NextRequest){
  return `${forwarded||request.headers.get('x-real-ip')||'unknown'}:${request.nextUrl.pathname}`
 }
 
+function requestLimit(pathname:string){
+ if(pathname==='/api/auth/recover'||pathname==='/api/auth/register'||pathname==='/api/auth/reset')return 5
+ if(pathname==='/api/auth/login'||pathname.startsWith('/api/kyc'))return 10
+ if(pathname.startsWith('/api/admin/'))return 30
+ return 60
+}
+
 function enforceRequestSecurity(request:NextRequest){
  if(!request.nextUrl.pathname.startsWith('/api/'))return null
  const mutation=!['GET','HEAD','OPTIONS'].includes(request.method)
@@ -15,11 +22,11 @@ function enforceRequestSecurity(request:NextRequest){
   const origin=request.headers.get('origin')
   if(origin&&origin!==request.nextUrl.origin)return NextResponse.json({error:'Invalid request origin.'},{status:403})
  }
- const now=Date.now(),key=requestKey(request),current=windows.get(key)
+ const now=Date.now(),key=requestKey(request),current=windows.get(key),limit=requestLimit(request.nextUrl.pathname)
  if(!current||current.resetAt<=now)windows.set(key,{count:1,resetAt:now+60_000})
  else{
   current.count+=1
-  if(current.count>60)return NextResponse.json({error:'Too many requests. Please try again shortly.'},{status:429,headers:{'Retry-After':String(Math.ceil((current.resetAt-now)/1000))}})
+  if(current.count>limit)return NextResponse.json({error:'Too many requests. Please try again shortly.'},{status:429,headers:{'Retry-After':String(Math.ceil((current.resetAt-now)/1000))}})
  }
  return null
 }

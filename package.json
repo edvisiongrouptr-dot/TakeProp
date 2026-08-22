@@ -12,6 +12,11 @@
     "lint": "pnpm -w -r run lint",
     "test": "pnpm -w -r run test",
     "verify:release": "node scripts/verify-release.mjs",
+    "verify:risk-engine": "node scripts/verify-risk-engine.mjs",
+    "verify:payments-payouts": "node scripts/verify-payments-payouts.mjs",
+    "verify:identity-security": "node scripts/verify-identity-security.mjs",
+    "verify:operations": "node scripts/verify-operations.mjs",
+    "verify:all": "pnpm verify:release && pnpm verify:risk-engine && pnpm verify:payments-payouts && pnpm verify:identity-security && pnpm verify:operations",
     "verify:environment": "node scripts/verify-environment.mjs",
     "smoke:production": "node scripts/smoke-production.mjs"
   }
