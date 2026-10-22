@@ -9,8 +9,9 @@ await contains('supabase/migrations/20260822100000_harden_kyc_auth_and_admin.sql
  'alter table public.user_roles enable row level security','A KYC session is required before approval'
 ])
 await contains('supabase/functions/kyc/index.ts',[
- 'constantTimeEqual','internal_consume_rate_limit','safeSiteUrl','Invalid signature',
- "verification.protocol!=='https:'",'p_payload:{eventId:event.id,status:event.status}'
+ 'constantTimeEqual','internal_consume_rate_limit','DIDIT_API_KEY','DIDIT_WORKFLOW_ID',
+ 'x-signature-v2','verification.didit.me/v3/session/','Invalid signature',
+ "verification.protocol!=='https:'","p_provider:'didit'"
 ])
 await contains('apps/web/lib/password-policy.ts',['PASSWORD_MIN_LENGTH=12','uppercase, lowercase, number and symbol'])
 await contains('apps/web/app/api/admin/operations/route.ts',["roleSet.has('compliance')",'Valid KYC decision details are required'])
