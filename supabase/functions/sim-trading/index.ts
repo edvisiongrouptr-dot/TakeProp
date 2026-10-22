@@ -33,7 +33,7 @@ async function fetchJson(url: string) {
 
 async function allMarkPrices() {
   const binanceSymbols=encodeURIComponent(JSON.stringify(symbols));
-  const binance = fetchJson(`https://api.binance.com/api/v3/ticker/price?symbols=${binanceSymbols}`)
+  const binance = fetchJson(`https://data-api.binance.vision/api/v3/ticker/price?symbols=${binanceSymbols}`)
     .then((rows: Array<{symbol:string;price:string}>) => Object.fromEntries(rows.map(row => [row.symbol, Number(row.price)])));
   const coinGecko = fetchJson(`https://api.coingecko.com/api/v3/simple/price?ids=${[...assets.map(([, ,gecko])=>gecko),'tether'].join(',')}&vs_currencies=usd`)
     .then(x => { const peg=Number(x?.tether?.usd)||1; return Object.fromEntries(assets.map(([symbol,,gecko]) => [symbol, Number(x?.[gecko]?.usd)/peg])); });

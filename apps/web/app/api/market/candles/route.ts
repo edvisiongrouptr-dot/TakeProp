@@ -10,11 +10,15 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'Unsupported market or interval' }, { status: 400 })
   }
   try {
-    const url = new URL('https://api.binance.com/api/v3/klines')
-    url.searchParams.set('symbol', symbol); url.searchParams.set('interval', interval); url.searchParams.set('limit', '120')
-    const response = await fetch(url, { headers: { 'user-agent': 'TakeProp-Market-Chart/1.0' }, next: { revalidate: interval === '1m' ? 10 : 30 }, signal: AbortSignal.timeout(7000) })
-    if (!response.ok) throw new Error(`Binance returned ${response.status}`)
-    const raw = await response.json()
+    let raw: unknown = null
+    for (const origin of ['https://data-api.binance.vision', 'https://api.binance.com']) {
+      try {
+        const url = new URL('/api/v3/klines', origin)
+        url.searchParams.set('symbol', symbol); url.searchParams.set('interval', interval); url.searchParams.set('limit', '120')
+        const response = await fetch(url, { headers: { 'user-agent': 'TakeProp-Market-Chart/1.0' }, next: { revalidate: interval === '1m' ? 10 : 30 }, signal: AbortSignal.timeout(7000) })
+        if (response.ok) { raw = await response.json(); break }
+      } catch { /* Try the next Binance public-data origin. */ }
+    }
     if (!Array.isArray(raw)) throw new Error('Invalid candle response')
     const candles = raw.map((row: unknown[]) => ({ time: Number(row[0]), open: Number(row[1]), high: Number(row[2]), low: Number(row[3]), close: Number(row[4]), volume: Number(row[5]) }))
       .filter(candle => Object.values(candle).every(Number.isFinite) && candle.time > 0 && candle.low > 0 && candle.high >= candle.low)

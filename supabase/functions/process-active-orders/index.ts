@@ -12,7 +12,7 @@ async function fetchJson(url:string){const controller=new AbortController(),time
 async function prices(){
  const binanceSymbols=encodeURIComponent(JSON.stringify(symbols))
  const sources=await Promise.allSettled([
-  fetchJson(`https://api.binance.com/api/v3/ticker/price?symbols=${binanceSymbols}`).then((rows:Array<{symbol:string;price:string}>)=>Object.fromEntries(rows.map(row=>[row.symbol,+row.price]))),
+  fetchJson(`https://data-api.binance.vision/api/v3/ticker/price?symbols=${binanceSymbols}`).then((rows:Array<{symbol:string;price:string}>)=>Object.fromEntries(rows.map(row=>[row.symbol,+row.price]))),
   fetchJson(`https://api.coingecko.com/api/v3/simple/price?ids=${[...assets.map(([, ,gecko])=>gecko),'tether'].join(',')}&vs_currencies=usd`).then(x=>{const peg=+x?.tether?.usd||1;return Object.fromEntries(assets.map(([symbol,,gecko])=>[symbol,+x?.[gecko]?.usd/peg]))})
  ])
  const valid=sources.flatMap(x=>x.status==='fulfilled'?[x.value]:[]);if(!valid.length)throw new Error('Market data unavailable')
