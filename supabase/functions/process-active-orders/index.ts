@@ -1,12 +1,19 @@
-const symbols=['BTCUSDT','ETHUSDT','SOLUSDT','BNBUSDT'] as const
+const assets=[
+ ['BTCUSDT','BTC','bitcoin'],['ETHUSDT','ETH','ethereum'],['SOLUSDT','SOL','solana'],['BNBUSDT','BNB','binancecoin'],
+ ['XRPUSDT','XRP','ripple'],['ADAUSDT','ADA','cardano'],['DOGEUSDT','DOGE','dogecoin'],['AVAXUSDT','AVAX','avalanche-2'],
+ ['LINKUSDT','LINK','chainlink'],['DOTUSDT','DOT','polkadot'],['LTCUSDT','LTC','litecoin'],['TRXUSDT','TRX','tron'],
+ ['SUIUSDT','SUI','sui'],['AAVEUSDT','AAVE','aave'],
+] as const
+const symbols=assets.map(([symbol])=>symbol)
 const json=(body:unknown,status=200)=>new Response(JSON.stringify(body),{status,headers:{'content-type':'application/json','cache-control':'no-store'}})
 function constantTimeEqual(left:string,right:string){if(left.length!==right.length)return false;let difference=0;for(let i=0;i<left.length;i++)difference|=left.charCodeAt(i)^right.charCodeAt(i);return difference===0}
 function secret(name:string,fallback:string){const direct=Deno.env.get(name);if(direct)return direct;const raw=Deno.env.get(fallback)||'';try{const parsed=JSON.parse(raw);return String(parsed.default||Object.values(parsed)[0]||'')}catch{return raw}}
 async function fetchJson(url:string){const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),4500);try{const response=await fetch(url,{signal:controller.signal,headers:{'user-agent':'TakeProp-Order-Worker/1.0'}});if(!response.ok)throw new Error(`HTTP ${response.status}`);return await response.json()}finally{clearTimeout(timer)}}
 async function prices(){
+ const binanceSymbols=encodeURIComponent(JSON.stringify(symbols))
  const sources=await Promise.allSettled([
-  fetchJson('https://min-api.cryptocompare.com/data/pricemulti?fsyms=BTC,ETH,SOL,BNB&tsyms=USDT').then(x=>({BTCUSDT:+x?.BTC?.USDT,ETHUSDT:+x?.ETH?.USDT,SOLUSDT:+x?.SOL?.USDT,BNBUSDT:+x?.BNB?.USDT})),
-  fetchJson('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,binancecoin,tether&vs_currencies=usd').then(x=>{const peg=+x?.tether?.usd||1;return{BTCUSDT:+x?.bitcoin?.usd/peg,ETHUSDT:+x?.ethereum?.usd/peg,SOLUSDT:+x?.solana?.usd/peg,BNBUSDT:+x?.binancecoin?.usd/peg}})
+  fetchJson(`https://api.binance.com/api/v3/ticker/price?symbols=${binanceSymbols}`).then((rows:Array<{symbol:string;price:string}>)=>Object.fromEntries(rows.map(row=>[row.symbol,+row.price]))),
+  fetchJson(`https://api.coingecko.com/api/v3/simple/price?ids=${[...assets.map(([, ,gecko])=>gecko),'tether'].join(',')}&vs_currencies=usd`).then(x=>{const peg=+x?.tether?.usd||1;return Object.fromEntries(assets.map(([symbol,,gecko])=>[symbol,+x?.[gecko]?.usd/peg]))})
  ])
  const valid=sources.flatMap(x=>x.status==='fulfilled'?[x.value]:[]);if(!valid.length)throw new Error('Market data unavailable')
  const marks:Record<string,number>={};for(const symbol of symbols){const values=valid.map(x=>+x[symbol]).filter(x=>Number.isFinite(x)&&x>0).sort((a,b)=>a-b);if(!values.length)throw new Error(`Missing ${symbol}`);const mark=values.length>1?(values[0]+values[1])/2:values[0];if(values.length>1&&(values[1]-values[0])/mark>.015)throw new Error(`Divergent ${symbol}`);marks[symbol]=mark}return marks

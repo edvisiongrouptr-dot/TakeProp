@@ -1,4 +1,10 @@
-const symbols = ["BTCUSDT", "ETHUSDT", "SOLUSDT", "BNBUSDT"] as const;
+const assets = [
+  ['BTCUSDT','BTC','bitcoin'],['ETHUSDT','ETH','ethereum'],['SOLUSDT','SOL','solana'],['BNBUSDT','BNB','binancecoin'],
+  ['XRPUSDT','XRP','ripple'],['ADAUSDT','ADA','cardano'],['DOGEUSDT','DOGE','dogecoin'],['AVAXUSDT','AVAX','avalanche-2'],
+  ['LINKUSDT','LINK','chainlink'],['DOTUSDT','DOT','polkadot'],['LTCUSDT','LTC','litecoin'],['TRXUSDT','TRX','tron'],
+  ['SUIUSDT','SUI','sui'],['AAVEUSDT','AAVE','aave'],
+] as const;
+const symbols = assets.map(([symbol]) => symbol);
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -26,11 +32,12 @@ async function fetchJson(url: string) {
 }
 
 async function allMarkPrices() {
-  const cryptoCompare = fetchJson("https://min-api.cryptocompare.com/data/pricemulti?fsyms=BTC,ETH,SOL,BNB&tsyms=USDT")
-    .then(x => ({ BTCUSDT:Number(x?.BTC?.USDT), ETHUSDT:Number(x?.ETH?.USDT), SOLUSDT:Number(x?.SOL?.USDT), BNBUSDT:Number(x?.BNB?.USDT) }));
-  const coinGecko = fetchJson("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,ethereum,solana,binancecoin,tether&vs_currencies=usd")
-    .then(x => { const peg=Number(x?.tether?.usd)||1; return { BTCUSDT:Number(x?.bitcoin?.usd)/peg, ETHUSDT:Number(x?.ethereum?.usd)/peg, SOLUSDT:Number(x?.solana?.usd)/peg, BNBUSDT:Number(x?.binancecoin?.usd)/peg }; });
-  const settled = await Promise.allSettled([cryptoCompare, coinGecko]);
+  const binanceSymbols=encodeURIComponent(JSON.stringify(symbols));
+  const binance = fetchJson(`https://api.binance.com/api/v3/ticker/price?symbols=${binanceSymbols}`)
+    .then((rows: Array<{symbol:string;price:string}>) => Object.fromEntries(rows.map(row => [row.symbol, Number(row.price)])));
+  const coinGecko = fetchJson(`https://api.coingecko.com/api/v3/simple/price?ids=${[...assets.map(([, ,gecko])=>gecko),'tether'].join(',')}&vs_currencies=usd`)
+    .then(x => { const peg=Number(x?.tether?.usd)||1; return Object.fromEntries(assets.map(([symbol,,gecko]) => [symbol, Number(x?.[gecko]?.usd)/peg])); });
+  const settled = await Promise.allSettled([binance, coinGecko]);
   const providers = settled.flatMap(x => x.status === "fulfilled" ? [x.value] : []);
   if (!providers.length) throw new Error("Market price providers unavailable");
   const marks: Record<string,number> = {};
@@ -41,7 +48,7 @@ async function allMarkPrices() {
     if(values.length>1&&(values[1]-values[0])/mark>0.015)throw new Error(`Market price validation failed for ${symbol}`);
     marks[symbol]=mark;
   }
-  return { marks, source: providers.length>1 ? "Validated CryptoCompare + CoinGecko reference price" : "Validated reference market price" };
+  return { marks, source: providers.length>1 ? "Validated Binance + CoinGecko reference price" : "Validated reference market price" };
 }
 
 Deno.serve(async (req: Request) => {
