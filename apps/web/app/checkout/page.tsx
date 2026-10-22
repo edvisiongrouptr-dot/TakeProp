@@ -9,9 +9,10 @@ import './network.css'
 type Plan = { id: string; slug: string; name: string; account_size: number; price: number; profit_target_pct: number; daily_loss_limit_pct: number; max_loss_limit_pct: number; profit_split_pct: number; rules: { challenge_type?: string; phase_2_profit_target_pct?: number } }
 const usd=(value:number)=>new Intl.NumberFormat('en-US',{style:'currency',currency:'USD',maximumFractionDigits:0}).format(value)
 
-export default async function Checkout({ searchParams }: { searchParams: { plan?: string } }) {
-  const auth = await getAuthenticatedUser(); if (!auth) redirect(`/auth?next=${encodeURIComponent(`/checkout?plan=${searchParams.plan || ''}`)}`)
-  const slug = typeof searchParams.plan === 'string' ? searchParams.plan : ''
+export default async function Checkout({ searchParams }: { searchParams: Promise<{ plan?: string }> }) {
+  const params = await searchParams
+  const auth = await getAuthenticatedUser(); if (!auth) redirect(`/auth?next=${encodeURIComponent(`/checkout?plan=${params.plan || ''}`)}`)
+  const slug = typeof params.plan === 'string' ? params.plan : ''
   const plans = await getOwnData<Plan[]>(`challenge_plans?select=id,slug,name,account_size,price,profit_target_pct,daily_loss_limit_pct,max_loss_limit_pct,profit_split_pct,rules&slug=eq.${encodeURIComponent(slug)}&is_active=eq.true&limit=1`, auth.accessToken)
   const plan = plans[0]; if (!plan) redirect('/#plans')
   const twoStep = plan.rules?.challenge_type === 'two_step'
