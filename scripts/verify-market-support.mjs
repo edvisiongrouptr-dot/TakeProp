@@ -9,6 +9,7 @@ const files = {
   supportSchema: await readFile('supabase/migrations/20261023123000_normalize_support_message_author.sql', 'utf8'),
   supportTicketSchema: await readFile('supabase/migrations/20261023124000_complete_support_ticket_schema.sql', 'utf8'),
   supportStatuses: await readFile('supabase/migrations/20261023125000_expand_support_ticket_statuses.sql', 'utf8'),
+  supportDelivery: await readFile('supabase/migrations/20261023200000_support_team_delivery_fallback.sql', 'utf8'),
   chart: await readFile('apps/web/app/terminal/market-chart.tsx', 'utf8'),
   candles: await readFile('apps/web/app/api/market/candles/route.ts', 'utf8'),
 }
@@ -21,6 +22,7 @@ for (const needle of ['support_team_message',"r.role in ('admin','support')",'Cu
 for (const needle of ['rename column user_id to author_user_id',"column_name='author_user_id'"]) if (!files.supportSchema.includes(needle)) failures.push(`support schema migration is missing ${needle}`)
 for (const needle of ['assigned_to uuid','closed_at timestamptz']) if (!files.supportTicketSchema.includes(needle)) failures.push(`support ticket schema migration is missing ${needle}`)
 for (const needle of ['waiting_user','waiting_support','waiting_for_user','in_progress']) if (!files.supportStatuses.includes(needle)) failures.push(`support status migration is missing ${needle}`)
+for (const needle of ['support_team_alert','internal_notify_support_team','New support request · TakeProp']) if (!files.supportDelivery.includes(needle)) failures.push(`support delivery fallback is missing ${needle}`)
 
 if (failures.length) { console.error(failures.map(item => `FAIL ${item}`).join('\n')); process.exit(1) }
 console.log(`Market chart and support routing verified (${expected.length} supported markets).`)
