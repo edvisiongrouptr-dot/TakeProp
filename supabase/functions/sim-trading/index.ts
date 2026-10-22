@@ -91,6 +91,10 @@ Deno.serve(async (req: Request) => {
     } else if (action === "cancel_pending") {
       rpc = "internal_cancel_pending_order";
       payload = { p_user_id: user.id, p_account_id: accountId, p_order_id: body.orderId };
+    } else if (action === "update_protection") {
+      const symbol = String(body.symbol || "").toUpperCase();
+      rpc = "internal_update_trade_protection";
+      payload = { p_user_id: user.id, p_account_id: accountId, p_trade_id: body.tradeId, p_symbol: symbol, p_stop_loss: body.stopLoss ? Number(body.stopLoss) : null, p_take_profit: body.takeProfit ? Number(body.takeProfit) : null, p_mark: marks[symbol] };
     } else if (action === "close") {
       const symbol = String(body.symbol || "").toUpperCase();
       rpc = "internal_close_sim_trade";
