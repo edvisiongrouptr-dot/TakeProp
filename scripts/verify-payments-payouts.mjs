@@ -3,6 +3,8 @@ import {readFile} from 'node:fs/promises'
 const migration=await readFile('supabase/migrations/20260822093000_harden_payments_and_payouts.sql','utf8')
 const orderRoute=await readFile('apps/web/app/api/orders/usdt/route.ts','utf8')
 const payoutPage=await readFile('apps/web/app/payouts/page.tsx','utf8')
+const activationMigration=await readFile('supabase/migrations/20261023160000_challenge_activation_email.sql','utf8')
+const dashboard=await readFile('apps/web/app/dashboard/page.tsx','utf8')
 const checks=[
  ['unique outbound reference',/create unique index if not exists payout_provider_reference_unique/i.test(migration)],
  ['strict payout transitions',/Invalid payout status transition/.test(migration)],
@@ -15,7 +17,10 @@ const checks=[
  ['frozen payout rules',/v_account\.rule_snapshot->>'profitSplitPct'/.test(migration)],
  ['pending order payout block',/public\.pending_orders/.test(migration)],
  ['rich order snapshot',/daily_loss_limit_pct:plan\.daily_loss_limit_pct/.test(orderRoute)&&/profit_split_pct:plan\.profit_split_pct/.test(orderRoute)],
- ['payout UI frozen snapshot',/rule_snapshot/.test(payoutPage)&&/minimumPayoutUsd/.test(payoutPage)]
+ ['payout UI frozen snapshot',/rule_snapshot/.test(payoutPage)&&/minimumPayoutUsd/.test(payoutPage)],
+ ['payment review confirmation',/review it as soon as possible/.test(dashboard)&&/email you when your trading account is activated/.test(dashboard)],
+ ['activation email template',/challenge_account_activated/.test(activationMigration)&&/Welcome to the TakeProp family/.test(activationMigration)&&/https:\/\/takeprop\.trade\/terminal/.test(activationMigration)],
+ ['activation email on paid transition',/after update of status on public\.orders/i.test(activationMigration)&&/old\.status is distinct from new\.status/i.test(activationMigration)]
 ]
 const failed=checks.filter(([,ok])=>!ok)
 if(failed.length){for(const [name] of failed)console.error(`FAIL ${name}`);process.exit(1)}
