@@ -31,7 +31,7 @@ if (!protectionMigration.includes('internal_validate_protection') || !protection
 if (!terminal.includes('[1,2,5,10,20,25,50,75,100]')) failures.push('100x terminal leverage options')
 if (!terminal.includes("action:'update_protection'") || !terminal.includes('Edit SL/TP')) failures.push('open position SL/TP editor')
 for (const route of ['/dashboard','/terminal','/payouts','/kyc','/notifications','/support']) if (!menu.includes(`href="${route}"`)) failures.push(`menu route ${route}`)
-if (!menu.includes("'use client'") || !menu.includes("removeAttribute('open')")) failures.push('menu closes after navigation')
+if (!menu.includes("'use client'") || !menu.includes('setOpen(false)') || !menu.includes('usePathname')) failures.push('menu closes after navigation')
 if (!menu.includes('>Profile</Link>')) failures.push('operations profile label')
 
 if (failures.length) {
