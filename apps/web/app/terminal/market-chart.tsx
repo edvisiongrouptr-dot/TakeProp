@@ -7,7 +7,7 @@ const intervals = ['1m', '5m', '15m', '1h', '4h', '1d'] as const
 const chartWidth = 1000, chartHeight = 390, priceHeight = 292, volumeTop = 312, volumeHeight = 54, plotRight = 918
 const format = (value: number) => new Intl.NumberFormat('en-US', { maximumFractionDigits: value < 1 ? 6 : value < 10 ? 4 : 2 }).format(value)
 
-export default function MarketChart({ symbol, label, mark }: { symbol: string; label: string; mark: number }) {
+export default function MarketChart({ symbol, label, mark, showMarkLine }: { symbol: string; label: string; mark: number; showMarkLine: boolean }) {
   const [interval, setIntervalValue] = useState<(typeof intervals)[number]>('5m')
   const [candles, setCandles] = useState<Candle[]>([])
   const [error, setError] = useState('')
@@ -59,7 +59,7 @@ export default function MarketChart({ symbol, label, mark }: { symbol: string; l
       <svg viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label={`${label} ${interval} candlestick chart`} onMouseMove={move} onMouseLeave={() => setActive(null)}>
         {[0, .25, .5, .75, 1].map(fraction => { const y = 12 + fraction * (priceHeight - 24), value = model.high - fraction * (model.high - model.low); return <g key={fraction}><line className={styles.chartGrid} x1="0" x2={plotRight} y1={y} y2={y}/><text className={styles.axisText} x="930" y={y + 4}>{format(value)}</text></g> })}
         {candles.map((candle, index) => { const x = index * model.step + model.step / 2, openY = model.y(candle.open), closeY = model.y(candle.close), up = candle.close >= candle.open, colorClass = up ? styles.candleUp : styles.candleDown, volumeY = volumeTop + volumeHeight - candle.volume / (model.maxVolume || 1) * volumeHeight; return <g key={candle.time} className={colorClass}><line x1={x} x2={x} y1={model.y(candle.high)} y2={model.y(candle.low)}/><rect x={x - model.body / 2} y={Math.min(openY, closeY)} width={model.body} height={Math.max(1.5, Math.abs(closeY - openY))}/><rect className={styles.volumeBar} x={x - model.body / 2} y={volumeY} width={model.body} height={volumeTop + volumeHeight - volumeY}/></g> })}
-        {mark > 0 ? <g className={styles.markLine}><line x1="0" x2={plotRight} y1={model.y(mark)} y2={model.y(mark)}/><text x={plotRight - 5} y={Math.max(14,model.y(mark)-5)} textAnchor="end">MARK {format(mark)}</text></g> : null}
+        {showMarkLine && mark > 0 ? <g className={styles.markLine}><line x1="0" x2={plotRight} y1={model.y(mark)} y2={model.y(mark)}/><text x={plotRight - 5} y={Math.max(14,model.y(mark)-5)} textAnchor="end">LIVE MARK {format(mark)}</text></g> : null}
         {[0, .25, .5, .75, 1].map(fraction => { const index = Math.min(candles.length - 1, Math.round((candles.length - 1) * fraction)), candle = candles[index], x = index * model.step + model.step / 2; return <text className={styles.axisText} key={fraction} x={x} y="386" textAnchor={fraction === 0 ? 'start' : fraction === 1 ? 'end' : 'middle'}>{new Intl.DateTimeFormat('en-GB', interval === '1d' ? { month: 'short', day: '2-digit' } : { hour: '2-digit', minute: '2-digit', hour12: false }).format(candle.time)}</text> })}
         {active !== null ? <g className={styles.crosshair}><line x1={active * model.step + model.step / 2} x2={active * model.step + model.step / 2} y1="0" y2={volumeTop + volumeHeight}/><line x1="0" x2={plotRight} y1={model.y(candles[active].close)} y2={model.y(candles[active].close)}/></g> : null}
       </svg>
