@@ -15,7 +15,7 @@ export async function GET(request: NextRequest) {
       try {
         const url = new URL('/api/v3/klines', origin)
         url.searchParams.set('symbol', symbol); url.searchParams.set('interval', interval); url.searchParams.set('limit', '120')
-        const response = await fetch(url, { headers: { 'user-agent': 'TakeProp-Market-Chart/1.0' }, next: { revalidate: interval === '1m' ? 10 : 30 }, signal: AbortSignal.timeout(7000) })
+        const response = await fetch(url, { headers: { 'user-agent': 'TakeProp-Market-Chart/1.0' }, next: { revalidate: 10 }, signal: AbortSignal.timeout(7000) })
         if (response.ok) { raw = await response.json(); break }
       } catch { /* Try the next Binance public-data origin. */ }
     }

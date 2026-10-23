@@ -17,6 +17,7 @@ const files = {
 const failures = []
 for (const symbol of expected) for (const [area, source] of Object.entries(files).slice(0, 4)) if (!source.includes(symbol)) failures.push(`${area} is missing ${symbol}`)
 for (const interval of ['1m','5m','15m','1h','4h','1d']) if (!files.chart.includes(`'${interval}'`)) failures.push(`chart is missing ${interval}`)
+for (const needle of ['TakeProp Mark · Binance candle data','styles.markLine','format(mark || current?.close || 0)']) if (!files.chart.includes(needle)) failures.push(`chart mark display is missing ${needle}`)
 for (const needle of ['data-api.binance.vision','api.binance.com','MARKET_SYMBOLS','AbortSignal.timeout']) if (!files.candles.includes(needle)) failures.push(`candle route is missing ${needle}`)
 for (const needle of ['support_team_message',"r.role in ('admin','support')",'Customer replied to support ticket']) if (!files.migration.includes(needle)) failures.push(`support migration is missing ${needle}`)
 for (const needle of ['rename column user_id to author_user_id',"column_name='author_user_id'"]) if (!files.supportSchema.includes(needle)) failures.push(`support schema migration is missing ${needle}`)
